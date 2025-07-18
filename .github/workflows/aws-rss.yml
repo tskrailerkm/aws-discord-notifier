@@ -1,55 +1,85 @@
-name: AWS RSS to Discord (Ultra Simple)
+name: AWS RSS to Discord (Single Thread)
 
 on:
   schedule:
-    # รันทุก 5 นาที
-    - cron: '*/5 * * * *'
-  workflow_dispatch: # สามารถรันด้วยตนเองได้
+    # Run every 30 minutes to check for new AWS announcements
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # Allow manual execution for testing purposes
 
 jobs:
   check-rss:
     runs-on: ubuntu-latest
     
     steps:
+    # Set up Node.js environment for RSS parsing and HTTP requests
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         
+    # Install required packages for RSS parsing and Discord communication
     - name: Install dependencies
       run: |
         npm init -y
         npm install rss-parser node-fetch@2
         
+    # Main workflow: Parse RSS feed and send new items to Discord thread
     - name: Check RSS and send to Discord
       run: |
         cat << 'EOF' > check-rss.js
+        /**
+         * AWS RSS to Discord Bot
+         * 
+         * This script monitors the AWS "What's New" RSS feed and automatically
+         * sends new announcements to a designated Discord thread. It uses a 
+         * time-based filtering approach to prevent duplicate messages.
+         * 
+         * Key Features:
+         * - Fetches AWS RSS feed every 15 minutes
+         * - Filters items to last 3 minutes to prevent duplicates
+         * - Sends formatted messages to a specific Discord thread
+         * - Displays timestamps in Bangkok timezone
+         * - Provides detailed logging for monitoring and debugging
+         */
+        
         const Parser = require('rss-parser');
         const fetch = require('node-fetch');
         
+        // Initialize RSS parser for XML feed processing
         const parser = new Parser();
-        const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';
-        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
         
+        // Configuration constants from environment variables
+        const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';
+        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL; // Discord webhook for posting messages
+        const THREAD_ID = process.env.THREAD_ID; // Specific thread ID for AWS updates
+        
+        /**
+         * Main execution function
+         * Orchestrates the entire workflow: fetch RSS, filter items, send to Discord
+         */
         async function main() {
           try {
             console.log('🔍 Checking AWS RSS feed...');
             
-            // อ่าน RSS feed
+            // Fetch and parse the AWS What's New RSS feed
             const feed = await parser.parseURL(RSS_URL);
             console.log(`📰 Found ${feed.items.length} items in feed`);
             
-            // กรองเฉพาะข่าวใน 3 นาทีล่าสุด (เข้มงวดมาก)
+            // Time-based filtering to identify truly new items
+            // Using a 3-minute window to minimize false positives while ensuring coverage
             const now = new Date();
-            const cutoffTime = new Date(now.getTime() - 30 * 60 * 1000); // 30 นาทีที่แล้ว
+            const cutoffTime = new Date(now.getTime() - 30 * 60 * 1000); // 30 minutes ago
             
+            // Log current time in both UTC and Bangkok timezone for debugging
             console.log(`⏰ Current time: ${now.toISOString()} (${now.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
             console.log(`⏰ Looking for items newer than: ${cutoffTime.toISOString()} (${cutoffTime.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
             
+            // Filter RSS items to find only recent announcements
             const recentItems = feed.items.filter(item => {
               const itemDate = new Date(item.pubDate);
               const isRecent = itemDate >= cutoffTime;
               
+              // Log each item for transparency and debugging
               console.log(`📰 Item: ${item.title.substring(0, 50)}...`);
               console.log(`   📅 Published: ${itemDate.toISOString()} (${itemDate.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
               
@@ -66,15 +96,16 @@ jobs:
             
             console.log(`🆕 Found ${recentItems.length} items from last 3 minutes`);
             
-            // ส่งรายการใหม่ทั้งหมดไปยัง Discord
+            // Process and send new items to Discord thread
             if (recentItems.length > 0) {
-              console.log(`📤 Sending ${recentItems.length} new items to Discord...`);
+              console.log(`📤 Sending ${recentItems.length} new items to permanent Discord Thread...`);
               
+              // Send each item individually with proper rate limiting
               for (let i = 0; i < recentItems.length; i++) {
                 const item = recentItems[i];
-                await sendToDiscord(item, i + 1, recentItems.length);
+                await sendToThread(item, i + 1, recentItems.length);
                 
-                // รอ 2 วินาทีระหว่างการส่งเพื่อป้องกัน Discord rate limit
+                // Rate limiting: Wait 2 seconds between messages to respect Discord API limits
                 if (i < recentItems.length - 1) {
                   await new Promise(resolve => setTimeout(resolve, 2000));
                 }
@@ -88,25 +119,46 @@ jobs:
           }
         }
         
-        async function sendToDiscord(item, index = 1, total = 1) {
+        /**
+         * Send a single RSS item to the designated Discord thread
+         * 
+         * @param {Object} item - RSS feed item object containing title, link, content, etc.
+         * @param {number} index - Current item number (for display purposes)
+         * @param {number} total - Total number of items being sent (for display purposes)
+         */
+        async function sendToThread(item, index = 1, total = 1) {
           try {
-            // สร้างข้อความสำหรับ Discord
+            // Create rich embed message for Discord with AWS branding
             const embed = {
+              // Ensure title doesn't exceed Discord's 256 character limit
               title: item.title.length > 256 ? item.title.substring(0, 253) + '...' : item.title,
+              
+              // Direct link to the AWS announcement
               url: item.link,
+              
+              // Truncate description to fit Discord's embed limits (4096 chars max)
               description: item.contentSnippet ? 
                 (item.contentSnippet.length > 500 ? 
                   item.contentSnippet.substring(0, 497) + '...' : 
                   item.contentSnippet) : 'No description available',
-              color: 0xFF9900, // AWS orange color
+              
+              // AWS brand orange color for visual consistency
+              color: 0xFF9900,
+              
+              // Use ISO timestamp for proper Discord time formatting
               timestamp: item.isoDate || item.pubDate,
+              
+              // Footer with AWS branding and progress indicator
               footer: {
                 text: `AWS What's New • ${index}/${total}`,
                 icon_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico'
               },
+              
+              // Additional metadata fields
               fields: [
                 {
                   name: '📅 Published',
+                  // Format date in Bangkok timezone for local relevance
                   value: new Date(item.pubDate).toLocaleDateString('th-TH', {
                     timeZone: 'Asia/Bangkok',
                     year: 'numeric',
@@ -121,13 +173,23 @@ jobs:
               ]
             };
             
+            // Construct webhook URL for thread-specific posting
+            // If THREAD_ID is provided, append it as a query parameter
+            const threadWebhookUrl = THREAD_ID ? 
+              `${WEBHOOK_URL}?thread_id=${THREAD_ID}` : 
+              WEBHOOK_URL;
+            
+            // Prepare Discord webhook payload with bot identity
             const payload = {
-              username: 'AWS Updates',
-              avatar_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico',
-              embeds: [embed]
+              username: 'AWS Updates',                    // Display name for the bot
+              avatar_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico', // AWS favicon
+              embeds: [embed]                             // Rich embed content
             };
             
-            const response = await fetch(WEBHOOK_URL, {
+            console.log(`🧵 Sending to thread ID: ${THREAD_ID || 'main channel'}`);
+            
+            // Send HTTP POST request to Discord webhook
+            const response = await fetch(threadWebhookUrl, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -135,21 +197,25 @@ jobs:
               body: JSON.stringify(payload)
             });
             
+            // Handle response and log results
             if (response.ok) {
-              console.log(`✅ Sent: ${item.title.substring(0, 50)}...`);
+              console.log(`✅ Sent to thread: ${item.title.substring(0, 50)}...`);
             } else {
+              // Log detailed error information for debugging
               const errorText = await response.text();
-              console.error(`❌ Failed to send to Discord: ${response.status} - ${errorText}`);
+              console.error(`❌ Failed to send to Discord thread: ${response.status} - ${errorText}`);
             }
             
           } catch (error) {
-            console.error('❌ Error sending to Discord:', error);
+            console.error('❌ Error sending to Discord thread:', error);
           }
         }
         
+        // Execute the main function
         main();
         EOF
         
         node check-rss.js
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        THREAD_ID: ${{ secrets.THREAD_ID || '' }}
