@@ -1,4 +1,4 @@
-name: AWS RSS to Discord (Time Based)
+name: AWS RSS to Discord (Variables)
 
 on:
   schedule:
@@ -30,6 +30,9 @@ jobs:
         const parser = new Parser();
         const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';
         const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+        const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+        const REPO_OWNER = process.env.GITHUB_REPOSITORY.split('/')[0];
+        const REPO_NAME = process.env.GITHUB_REPOSITORY.split('/')[1];
         
         async function main() {
           try {
@@ -39,31 +42,51 @@ jobs:
             const feed = await parser.parseURL(RSS_URL);
             console.log(`📰 Found ${feed.items.length} items in feed`);
             
-            // กรองเฉพาะข่าวใน 35 นาทีล่าสุด (เผื่อไว้ 5 นาที)
-            const now = new Date();
-            const cutoffTime = new Date(now.getTime() - 35 * 60 * 1000); // 35 นาทีที่แล้ว
-            
-            console.log(`⏰ Looking for items newer than: ${cutoffTime.toISOString()}`);
-            
-            const recentItems = feed.items.filter(item => {
-              const itemDate = new Date(item.pubDate);
-              const isRecent = itemDate >= cutoffTime;
+            // อ่านรายการเก่าจาก GitHub Variables
+            let lastItems = [];
+            try {
+              const response = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/variables/LAST_ITEMS`, {
+                headers: {
+                  'Authorization': `token ${GITHUB_TOKEN}`,
+                  'Accept': 'application/vnd.github.v3+json'
+                }
+              });
               
-              if (isRecent) {
-                console.log(`✨ Recent item found: ${item.title.substring(0, 60)}... (${itemDate.toISOString()})`);
+              if (response.ok) {
+                const data = await response.json();
+                lastItems = JSON.parse(data.value || '[]');
+                console.log(`📖 Loaded ${lastItems.length} previous items from GitHub Variables`);
+              } else {
+                console.log('📝 No previous items found, treating all items as new');
               }
+            } catch (error) {
+              console.log('📝 Error reading previous items:', error.message);
+              console.log('📝 Treating all items as new');
+            }
+            
+            // หารายการใหม่ - เช็คทั้ง ID และเวลา
+            const lastItemIds = lastItems.map(item => item.guid || item.link);
+            const lastRunTime = lastItems.length > 0 ? 
+              new Date(Math.max(...lastItems.map(item => new Date(item.pubDate).getTime()))) :
+              new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 ชั่วโมงที่แล้วถ้าไม่มีข้อมูล
+            
+            const newItems = feed.items.filter(item => {
+              const itemDate = new Date(item.pubDate);
+              const isNewById = !lastItemIds.includes(item.guid || item.link);
+              const isNewerThanLastRun = itemDate > lastRunTime;
               
-              return isRecent;
+              // ต้องเป็นข่าวใหม่ทั้งใน ID และเวลา
+              return isNewById && isNewerThanLastRun;
             });
             
-            console.log(`🆕 Found ${recentItems.length} items from last 35 minutes`);
+            console.log(`🆕 Found ${newItems.length} new items`);
             
             // ส่งรายการใหม่ทั้งหมดไปยัง Discord
-            if (recentItems.length > 0) {
-              console.log(`📤 Sending ${recentItems.length} new items to Discord...`);
+            if (newItems.length > 0) {
+              console.log(`📤 Sending ${newItems.length} new items to Discord...`);
               
-              // จำกัดสูงสุด 10 รายการเพื่อป้องกัน spam
-              const itemsToSend = recentItems.slice(0, 10);
+              // จำกัดสูงสุด 20 รายการเพื่อป้องกัน spam
+              const itemsToSend = newItems.slice(0, 20);
               
               for (let i = 0; i < itemsToSend.length; i++) {
                 const item = itemsToSend[i];
@@ -75,15 +98,69 @@ jobs:
                 }
               }
               
-              if (recentItems.length > 10) {
-                console.log(`⚠️ Limited to 10 items (found ${recentItems.length} total)`);
+              if (newItems.length > 20) {
+                console.log(`⚠️ Limited to 20 items (found ${newItems.length} total)`);
               }
+              
+              // บันทึกรายการล่าสุดไปยัง GitHub Variables
+              await updateLastItems(feed.items.slice(0, 20));
+              
             } else {
-              console.log('📭 No new items to send (no items in last 35 minutes)');
+              console.log('📭 No new items to send');
             }
             
           } catch (error) {
             console.error('❌ Error:', error);
+          }
+        }
+        
+        async function updateLastItems(items) {
+          try {
+            const itemsToSave = items.map(item => ({
+              guid: item.guid || item.link,
+              link: item.link,
+              title: item.title,
+              pubDate: item.pubDate
+            }));
+            
+            const response = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/variables/LAST_ITEMS`, {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `token ${GITHUB_TOKEN}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                name: 'LAST_ITEMS',
+                value: JSON.stringify(itemsToSave)
+              })
+            });
+            
+            if (response.ok) {
+              console.log('💾 Saved latest items to GitHub Variables');
+            } else {
+              // ถ้ายังไม่มี variable ลองสร้างใหม่
+              const createResponse = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/actions/variables`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `token ${GITHUB_TOKEN}`,
+                  'Accept': 'application/vnd.github.v3+json',
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  name: 'LAST_ITEMS',
+                  value: JSON.stringify(itemsToSave)
+                })
+              });
+              
+              if (createResponse.ok) {
+                console.log('💾 Created and saved latest items to GitHub Variables');
+              } else {
+                console.log('⚠️ Failed to save items to GitHub Variables');
+              }
+            }
+          } catch (error) {
+            console.error('⚠️ Error updating GitHub Variables:', error);
           }
         }
         
@@ -150,3 +227,4 @@ jobs:
         node check-rss.js
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
