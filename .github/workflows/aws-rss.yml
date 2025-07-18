@@ -2,7 +2,7 @@ name: AWS RSS to Discord (Ultra Simple)
 
 on:
   schedule:
-    # รันทุก 15 นาที
+    # รันทุก 5 นาที
     - cron: '*/5 * * * *'
   workflow_dispatch: # สามารถรันด้วยตนเองได้
 
@@ -41,7 +41,7 @@ jobs:
             
             // กรองเฉพาะข่าวใน 3 นาทีล่าสุด (เข้มงวดมาก)
             const now = new Date();
-            const cutoffTime = new Date(now.getTime() - 60 * 60 * 1000); // 3 นาทีที่แล้ว
+            const cutoffTime = new Date(now.getTime() - 1440 * 60 * 1000); // 1440 นาทีที่แล้ว
             
             console.log(`⏰ Current time: ${now.toISOString()} (${now.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
             console.log(`⏰ Looking for items newer than: ${cutoffTime.toISOString()} (${cutoffTime.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
@@ -80,7 +80,7 @@ jobs:
                 }
               }
             } else {
-              console.log('📭 No new items to send (no items in last 3 minutes)');
+              console.log('📭 No new items to send (no items in last 1440 minutes)');
             }
             
           } catch (error) {
