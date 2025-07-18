@@ -9,6 +9,8 @@ on:
 jobs:
   check-rss:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
     - name: Checkout repository
@@ -54,18 +56,45 @@ jobs:
               console.log('📝 No previous items found, treating all as new');
             }
             
-            // หารายการใหม่
+            // หารายการใหม่ - เช็คทั้ง ID และเวลา
             const lastItemIds = lastItems.map(item => item.guid || item.link);
-            const newItems = feed.items.filter(item => 
-              !lastItemIds.includes(item.guid || item.link)
-            );
+            const lastRunTime = lastItems.length > 0 ? 
+              new Date(Math.max(...lastItems.map(item => new Date(item.pubDate).getTime()))) :
+              new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 ชั่วโมงที่แล้วถ้าไม่มีข้อมูล
+            
+            const newItems = feed.items.filter(item => {
+              const itemDate = new Date(item.pubDate);
+              const isNewById = !lastItemIds.includes(item.guid || item.link);
+              const isNewerThanLastRun = itemDate > lastRunTime;
+              
+              // ต้องเป็นข่าวใหม่ทั้งใน ID และเวลา
+              return isNewById && isNewerThanLastRun;
+            });
             
             console.log(`🆕 Found ${newItems.length} new items`);
             
-            // ส่งรายการใหม่ไปยัง Discord
-            for (const item of newItems.slice(0, 5)) { // จำกัดไม่เกิน 5 รายการต่อครั้ง
-              await sendToDiscord(item);
-              await new Promise(resolve => setTimeout(resolve, 1000)); // รอ 1 วินาที
+            // ส่งรายการใหม่ทั้งหมดไปยัง Discord
+            if (newItems.length > 0) {
+              console.log(`📤 Sending ${newItems.length} new items to Discord...`);
+              
+              // จำกัดสูงสุด 20 รายการเพื่อป้องกัน spam
+              const itemsToSend = newItems.slice(0, 20);
+              
+              for (let i = 0; i < itemsToSend.length; i++) {
+                const item = itemsToSend[i];
+                await sendToDiscord(item, i + 1, itemsToSend.length);
+                
+                // รอ 2 วินาทีระหว่างการส่งเพื่อป้องกัน Discord rate limit
+                if (i < itemsToSend.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+              }
+              
+              if (newItems.length > 20) {
+                console.log(`⚠️ Limited to 20 items (found ${newItems.length} total)`);
+              }
+            } else {
+              console.log('📭 No new items to send');
             }
             
             // บันทึกรายการล่าสุด (เก็บ 20 รายการ)
@@ -84,7 +113,7 @@ jobs:
           }
         }
         
-        async function sendToDiscord(item) {
+        async function sendToDiscord(item, index = 1, total = 1) {
           try {
             // สร้างข้อความสำหรับ Discord
             const embed = {
@@ -97,7 +126,7 @@ jobs:
               color: 0xFF9900, // AWS orange color
               timestamp: item.isoDate || item.pubDate,
               footer: {
-                text: 'AWS What\'s New',
+                text: `AWS What's New • ${index}/${total}`,
                 icon_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico'
               },
               fields: [
@@ -146,13 +175,3 @@ jobs:
         node check-rss.js
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        
-    - name: Commit and push if changed
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        if [ -f last-items.json ]; then
-          git add last-items.json
-          git diff --staged --quiet || git commit -m "Update last items cache"
-          git push
-        fi
