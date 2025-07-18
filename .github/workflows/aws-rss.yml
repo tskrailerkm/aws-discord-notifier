@@ -1,0 +1,158 @@
+name: AWS RSS to Discord
+
+on:
+  schedule:
+    # รันทุก 30 นาที
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # สามารถรันด้วยตนเองได้
+
+jobs:
+  check-rss:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install dependencies
+      run: |
+        npm init -y
+        npm install rss-parser node-fetch@2
+        
+    - name: Check RSS and send to Discord
+      run: |
+        cat << 'EOF' > check-rss.js
+        const Parser = require('rss-parser');
+        const fetch = require('node-fetch');
+        const fs = require('fs');
+        
+        const parser = new Parser();
+        const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';
+        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+        const LAST_ITEMS_FILE = 'last-items.json';
+        
+        async function main() {
+          try {
+            console.log('🔍 Checking AWS RSS feed...');
+            
+            // อ่าน RSS feed
+            const feed = await parser.parseURL(RSS_URL);
+            console.log(`📰 Found ${feed.items.length} items in feed`);
+            
+            // อ่านรายการเก่า (ถ้ามี)
+            let lastItems = [];
+            try {
+              if (fs.existsSync(LAST_ITEMS_FILE)) {
+                lastItems = JSON.parse(fs.readFileSync(LAST_ITEMS_FILE, 'utf8'));
+              }
+            } catch (error) {
+              console.log('📝 No previous items found, treating all as new');
+            }
+            
+            // หารายการใหม่
+            const lastItemIds = lastItems.map(item => item.guid || item.link);
+            const newItems = feed.items.filter(item => 
+              !lastItemIds.includes(item.guid || item.link)
+            );
+            
+            console.log(`🆕 Found ${newItems.length} new items`);
+            
+            // ส่งรายการใหม่ไปยัง Discord
+            for (const item of newItems.slice(0, 5)) { // จำกัดไม่เกิน 5 รายการต่อครั้ง
+              await sendToDiscord(item);
+              await new Promise(resolve => setTimeout(resolve, 1000)); // รอ 1 วินาที
+            }
+            
+            // บันทึกรายการล่าสุด (เก็บ 20 รายการ)
+            const itemsToSave = feed.items.slice(0, 20).map(item => ({
+              guid: item.guid || item.link,
+              link: item.link,
+              title: item.title,
+              pubDate: item.pubDate
+            }));
+            
+            fs.writeFileSync(LAST_ITEMS_FILE, JSON.stringify(itemsToSave, null, 2));
+            console.log('💾 Saved latest items');
+            
+          } catch (error) {
+            console.error('❌ Error:', error);
+          }
+        }
+        
+        async function sendToDiscord(item) {
+          try {
+            // สร้างข้อความสำหรับ Discord
+            const embed = {
+              title: item.title.length > 256 ? item.title.substring(0, 253) + '...' : item.title,
+              url: item.link,
+              description: item.contentSnippet ? 
+                (item.contentSnippet.length > 500 ? 
+                  item.contentSnippet.substring(0, 497) + '...' : 
+                  item.contentSnippet) : 'No description available',
+              color: 0xFF9900, // AWS orange color
+              timestamp: item.isoDate || item.pubDate,
+              footer: {
+                text: 'AWS What\'s New',
+                icon_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico'
+              },
+              fields: [
+                {
+                  name: '📅 Published',
+                  value: new Date(item.pubDate).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  }),
+                  inline: true
+                }
+              ]
+            };
+            
+            const payload = {
+              username: 'AWS Updates',
+              avatar_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico',
+              embeds: [embed]
+            };
+            
+            const response = await fetch(WEBHOOK_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(payload)
+            });
+            
+            if (response.ok) {
+              console.log(`✅ Sent: ${item.title.substring(0, 50)}...`);
+            } else {
+              console.error(`❌ Failed to send: ${response.status}`);
+            }
+            
+          } catch (error) {
+            console.error('❌ Error sending to Discord:', error);
+          }
+        }
+        
+        main();
+        EOF
+        
+        node check-rss.js
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        
+    - name: Commit and push if changed
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        if [ -f last-items.json ]; then
+          git add last-items.json
+          git diff --staged --quiet || git commit -m "Update last items cache"
+          git push
+        fi
