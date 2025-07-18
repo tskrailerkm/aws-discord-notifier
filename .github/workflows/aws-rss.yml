@@ -1,4 +1,4 @@
-name: AWS RSS to Discord
+name: AWS RSS to Discord (Time Based)
 
 on:
   schedule:
@@ -9,13 +9,8 @@ on:
 jobs:
   check-rss:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
@@ -31,12 +26,10 @@ jobs:
         cat << 'EOF' > check-rss.js
         const Parser = require('rss-parser');
         const fetch = require('node-fetch');
-        const fs = require('fs');
         
         const parser = new Parser();
         const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';
         const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-        const LAST_ITEMS_FILE = 'last-items.json';
         
         async function main() {
           try {
@@ -46,54 +39,31 @@ jobs:
             const feed = await parser.parseURL(RSS_URL);
             console.log(`📰 Found ${feed.items.length} items in feed`);
             
-            // อ่านรายการเก่า (ถ้ามี)
-            let lastItems = [];
-            try {
-              if (fs.existsSync(LAST_ITEMS_FILE)) {
-                const fileContent = fs.readFileSync(LAST_ITEMS_FILE, 'utf8');
-                if (fileContent.trim()) {
-                  lastItems = JSON.parse(fileContent);
-                  console.log(`📖 Loaded ${lastItems.length} previous items from cache`);
-                } else {
-                  console.log('📝 Cache file is empty, treating all items as new');
-                }
-              } else {
-                console.log('📝 No cache file found, treating all items as new');
-              }
-            } catch (error) {
-              console.log('⚠️ Error reading cache file:', error.message);
-              console.log('🗑️ Removing corrupted cache file...');
-              try {
-                fs.unlinkSync(LAST_ITEMS_FILE);
-              } catch (deleteError) {
-                console.log('Failed to delete corrupted cache:', deleteError.message);
-              }
-              console.log('📝 Treating all items as new');
-            }
+            // กรองเฉพาะข่าวใน 35 นาทีล่าสุด (เผื่อไว้ 5 นาที)
+            const now = new Date();
+            const cutoffTime = new Date(now.getTime() - 35 * 60 * 1000); // 35 นาทีที่แล้ว
             
-            // หารายการใหม่ - เช็คทั้ง ID และเวลา
-            const lastItemIds = lastItems.map(item => item.guid || item.link);
-            const lastRunTime = lastItems.length > 0 ? 
-              new Date(Math.max(...lastItems.map(item => new Date(item.pubDate).getTime()))) :
-              new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 ชั่วโมงที่แล้วถ้าไม่มีข้อมูล
+            console.log(`⏰ Looking for items newer than: ${cutoffTime.toISOString()}`);
             
-            const newItems = feed.items.filter(item => {
+            const recentItems = feed.items.filter(item => {
               const itemDate = new Date(item.pubDate);
-              const isNewById = !lastItemIds.includes(item.guid || item.link);
-              const isNewerThanLastRun = itemDate > lastRunTime;
+              const isRecent = itemDate >= cutoffTime;
               
-              // ต้องเป็นข่าวใหม่ทั้งใน ID และเวลา
-              return isNewById && isNewerThanLastRun;
+              if (isRecent) {
+                console.log(`✨ Recent item found: ${item.title.substring(0, 60)}... (${itemDate.toISOString()})`);
+              }
+              
+              return isRecent;
             });
             
-            console.log(`🆕 Found ${newItems.length} new items`);
+            console.log(`🆕 Found ${recentItems.length} items from last 35 minutes`);
             
             // ส่งรายการใหม่ทั้งหมดไปยัง Discord
-            if (newItems.length > 0) {
-              console.log(`📤 Sending ${newItems.length} new items to Discord...`);
+            if (recentItems.length > 0) {
+              console.log(`📤 Sending ${recentItems.length} new items to Discord...`);
               
-              // จำกัดสูงสุด 20 รายการเพื่อป้องกัน spam
-              const itemsToSend = newItems.slice(0, 20);
+              // จำกัดสูงสุด 10 รายการเพื่อป้องกัน spam
+              const itemsToSend = recentItems.slice(0, 10);
               
               for (let i = 0; i < itemsToSend.length; i++) {
                 const item = itemsToSend[i];
@@ -105,23 +75,12 @@ jobs:
                 }
               }
               
-              if (newItems.length > 20) {
-                console.log(`⚠️ Limited to 20 items (found ${newItems.length} total)`);
+              if (recentItems.length > 10) {
+                console.log(`⚠️ Limited to 10 items (found ${recentItems.length} total)`);
               }
             } else {
-              console.log('📭 No new items to send');
+              console.log('📭 No new items to send (no items in last 35 minutes)');
             }
-            
-            // บันทึกรายการล่าสุด (เก็บ 20 รายการ)
-            const itemsToSave = feed.items.slice(0, 20).map(item => ({
-              guid: item.guid || item.link,
-              link: item.link,
-              title: item.title,
-              pubDate: item.pubDate
-            }));
-            
-            fs.writeFileSync(LAST_ITEMS_FILE, JSON.stringify(itemsToSave, null, 2));
-            console.log('💾 Saved latest items');
             
           } catch (error) {
             console.error('❌ Error:', error);
