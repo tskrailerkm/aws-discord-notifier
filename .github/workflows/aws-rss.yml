@@ -50,10 +50,24 @@ jobs:
             let lastItems = [];
             try {
               if (fs.existsSync(LAST_ITEMS_FILE)) {
-                lastItems = JSON.parse(fs.readFileSync(LAST_ITEMS_FILE, 'utf8'));
+                const fileContent = fs.readFileSync(LAST_ITEMS_FILE, 'utf8');
+                if (fileContent.trim()) {
+                  lastItems = JSON.parse(fileContent);
+                  console.log(`📖 Loaded ${lastItems.length} previous items from cache`);
+                } else {
+                  console.log('📝 Cache file is empty, treating all items as new');
+                }
+              } else {
+                console.log('📝 No cache file found, treating all items as new');
               }
             } catch (error) {
-              console.log('📝 Error reading previous items:', error.message);
+              console.log('⚠️ Error reading cache file:', error.message);
+              console.log('🗑️ Removing corrupted cache file...');
+              try {
+                fs.unlinkSync(LAST_ITEMS_FILE);
+              } catch (deleteError) {
+                console.log('Failed to delete corrupted cache:', deleteError.message);
+              }
               console.log('📝 Treating all items as new');
             }
             
