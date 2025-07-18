@@ -1,0 +1,122 @@
+[
+  {
+    "guid": "762e6d019614b51bd3390b52199fa40bbc0c5fa3",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-rds-sql-server-linked-servers-oracle-oledb-driver-version-21-16",
+    "title": "Amazon RDS for SQL Server now supports linked servers with Oracle OLEDB Driver version 21.16",
+    "pubDate": "Thu, 17 Jul 2025 21:14:00 GMT"
+  },
+  {
+    "guid": "e18f8f34922d146e4a20c3df3730b2fe008a644f",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-dynamodb-major-version-release-version-3-0-0/",
+    "title": "Announcing Amazon DynamoDB local major version release version 3.0.0",
+    "pubDate": "Thu, 17 Jul 2025 21:12:00 GMT"
+  },
+  {
+    "guid": "9e35e37f5d9406abbad38a21e184057b817e03f1",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-clean-rooms-ml-parquet-file-format/",
+    "title": "AWS Clean Rooms ML now supports Parquet file format",
+    "pubDate": "Thu, 17 Jul 2025 20:42:00 GMT"
+  },
+  {
+    "guid": "3c99c1a8972c992bbc0618729798313c0b9a4d93",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-ecs-built-in-blue-green-deployments/",
+    "title": "Amazon ECS enables built-in blue/green deployments",
+    "pubDate": "Thu, 17 Jul 2025 20:33:00 GMT"
+  },
+  {
+    "guid": "53361aee796bca15f63842c361c1308a4b78415c",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-sns-cross-region-delivery-capabilities",
+    "title": "Amazon SNS enhances cross-Region delivery capabilities",
+    "pubDate": "Thu, 17 Jul 2025 19:41:00 GMT"
+  },
+  {
+    "guid": "fc8e12599ad119dcf5f7482a762e4631db021fdf",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-lambda-debug-functions-cloud-vs-code-ide",
+    "title": "AWS Lambda enables developers to debug functions running in the cloud from VS Code IDE",
+    "pubDate": "Thu, 17 Jul 2025 18:49:00 GMT"
+  },
+  {
+    "guid": "eb7a1e35fd48b15183500a08468527425713fd17",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-lambda-low-latency-processing-kafka-events",
+    "title": "AWS Lambda announces low latency processing for Kafka events",
+    "pubDate": "Thu, 17 Jul 2025 18:19:00 GMT"
+  },
+  {
+    "guid": "875d1c6e7f01c4695877371c757bcdaf58772545",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-lambda-bridges-console-vs-code-unified-serverless-development-experience",
+    "title": "AWS Lambda bridges console to VS Code for unified serverless development experience",
+    "pubDate": "Thu, 17 Jul 2025 18:16:00 GMT"
+  },
+  {
+    "guid": "7a1c58dbc9dc0f4439373cbbf05043a25174c089",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-dynamodb-streams-new-api-feature",
+    "title": "Amazon DynamoDB Streams introduces a new API feature for faster and more efficient stream shard discovery",
+    "pubDate": "Thu, 17 Jul 2025 17:59:00 GMT"
+  },
+  {
+    "guid": "61cecb6112875aad66c57b41251d13b65e928955",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-connect-agent-workspace-agent-metrics/",
+    "title": "Amazon Connect agent workspace now includes real-time agent performance metrics ",
+    "pubDate": "Thu, 17 Jul 2025 17:54:00 GMT"
+  },
+  {
+    "guid": "9dc2b35b9de303f397b75a40a78c1d464759a182",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-outposts-booting-amazon-ec2-instances-storage-arrays/",
+    "title": "AWS Outposts now supports booting Amazon EC2 instances from external storage arrays",
+    "pubDate": "Thu, 17 Jul 2025 17:47:00 GMT"
+  },
+  {
+    "guid": "bb8960ae5d5c3fd674cf930f1290df9561c2cfa4",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-memorydb-supports-aws-fis-action-pause-multi-region-cluster-replication",
+    "title": "Amazon MemoryDB now supports an AWS FIS action to pause multi-Region cluster replication",
+    "pubDate": "Thu, 17 Jul 2025 15:33:00 GMT"
+  },
+  {
+    "guid": "20cc11bf7e58f51183ff3c1b788acd578b41b08b",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-rds-postgresql-18-beta-2-rds-database-preview-environment",
+    "title": "Amazon RDS for PostgreSQL 18 Beta 2 is now available in Amazon RDS Database Preview Environment",
+    "pubDate": "Thu, 17 Jul 2025 15:15:00 GMT"
+  },
+  {
+    "guid": "07ec2912664f524abd186f963695456d36dc57b4",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-appstream-2-0-support-gpu-based-instances",
+    "title": "Amazon AppStream 2.0 expands support for GPU based instances",
+    "pubDate": "Thu, 17 Jul 2025 13:54:00 GMT"
+  },
+  {
+    "guid": "a7f7e07610472ab3f293dafd25a43ca59dec2283",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-opensearch-service-supports-integration-aurora-mysql-postgresql",
+    "title": "Amazon OpenSearch Service now supports integration with Amazon Aurora MySQL and PostgreSQL",
+    "pubDate": "Thu, 17 Jul 2025 13:46:00 GMT"
+  },
+  {
+    "guid": "d29dd1ccb10dcdf8de8d8c56a44b2e6f14723ae4",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-opensearch-service-supports-integration-rds-mysql-postgresql",
+    "title": "Amazon OpenSearch Service now supports integration with Amazon RDS for MySQL and PostgreSQL",
+    "pubDate": "Thu, 17 Jul 2025 13:41:00 GMT"
+  },
+  {
+    "guid": "f14b11d1b72d948e46cb66aff99eab94c61658cd",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-s3-multi-region-access-points-available-additional-aws-regions",
+    "title": "Amazon S3 Multi-Region Access Points are now available in 12 additional AWS Regions ",
+    "pubDate": "Thu, 17 Jul 2025 13:21:00 GMT"
+  },
+  {
+    "guid": "f746355c6f3a26221d0ff1ade03bec037329b875",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-glue-supports-new-workers-larger-memory-intensive-workloads",
+    "title": "AWS Glue now supports new workers for larger and memory intensive workloads",
+    "pubDate": "Thu, 17 Jul 2025 13:17:00 GMT"
+  },
+  {
+    "guid": "533f252cff22f9a41f4796429f7dfb303a119b85",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/ai-agents-tools-aws-marketplace",
+    "title": "Introducing AI agents and tools in AWS Marketplace",
+    "pubDate": "Wed, 16 Jul 2025 22:22:00 GMT"
+  },
+  {
+    "guid": "1e6e13d06230a4b92a825f929c48d90e612163c3",
+    "link": "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-api-mcp-server-available",
+    "title": "AWS API MCP Server now available",
+    "pubDate": "Wed, 16 Jul 2025 22:10:00 GMT"
+  }
+]
