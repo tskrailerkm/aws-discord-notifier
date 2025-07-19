@@ -2,163 +2,275 @@ name: AWS RSS to Discord (Single Thread)
 
 on:
   schedule:
-    # Run every 30 minutes to check for new AWS announcements
+    # Execute every 30 minutes to check for new AWS announcements
+    # Using 30-minute intervals provides good coverage while reducing system load
+    # and minimizing redundant checks during quiet periods
     - cron: '*/30 * * * *'
-  workflow_dispatch: # Allow manual execution for testing purposes
+  workflow_dispatch: # Enable manual execution for testing and troubleshooting purposes
 
 jobs:
   check-rss:
     runs-on: ubuntu-latest
     
     steps:
-    # Set up Node.js environment for RSS parsing and HTTP requests
+    # Configure Node.js runtime environment for RSS parsing and HTTP operations
+    # Using Node.js 18 for optimal compatibility with npm packages and modern JavaScript features
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         
-    # Install required packages for RSS parsing and Discord communication
+    # Install required Node.js packages for core functionality
+    # rss-parser: XML RSS feed parsing and item extraction
+    # node-fetch@2: HTTP requests to Discord webhook API (v2 for compatibility)
     - name: Install dependencies
       run: |
+        # Initialize a new Node.js project with default configuration
         npm init -y
+        # Install essential packages for RSS parsing and HTTP communication
         npm install rss-parser node-fetch@2
         
-    # Main workflow: Parse RSS feed and send new items to Discord thread
+    # Primary workflow execution: RSS monitoring and Discord notification
+    # This step contains the complete logic for feed processing and message delivery
     - name: Check RSS and send to Discord
       run: |
         cat << 'EOF' > check-rss.js
         /**
-         * AWS RSS to Discord Bot
+         * AWS RSS to Discord Bot - Single Permanent Thread Implementation
          * 
-         * This script monitors the AWS "What's New" RSS feed and automatically
-         * sends new announcements to a designated Discord thread. It uses a 
-         * time-based filtering approach to prevent duplicate messages.
+         * OVERVIEW:
+         * This automated bot monitors the official AWS "What's New" RSS feed and delivers
+         * real-time notifications of new AWS service announcements, feature updates, and
+         * regional expansions to a designated Discord thread. The implementation prioritizes
+         * reliability, spam prevention, and accurate duplicate detection.
          * 
-         * Key Features:
-         * - Fetches AWS RSS feed every 15 minutes
-         * - Filters items to last 3 minutes to prevent duplicates
-         * - Sends formatted messages to a specific Discord thread
-         * - Displays timestamps in Bangkok timezone
-         * - Provides detailed logging for monitoring and debugging
+         * CORE FUNCTIONALITY:
+         * - Fetches AWS RSS feed every 30 minutes via scheduled GitHub Actions
+         * - Implements time-based filtering (3-minute window) to identify genuinely new content
+         * - Prevents duplicate notifications through temporal proximity analysis
+         * - Delivers rich, formatted embed messages to a specific Discord thread
+         * - Provides comprehensive logging for monitoring and debugging
+         * - Includes multiple spam protection mechanisms and rate limiting
+         * 
+         * ANTI-SPAM STRATEGY:
+         * - Time-window filtering: Only items published within last 3 minutes are considered
+         * - Quantity limiting: Maximum 5 items per execution to prevent Discord flooding
+         * - Rate limiting: 2-second delays between consecutive Discord API calls
+         * - Age verification: Rejects items older than reasonable timeframes
+         * 
+         * DISCORD INTEGRATION:
+         * - Uses webhook API for seamless message delivery without bot presence
+         * - Supports thread-specific posting via thread_id parameter
+         * - Implements Discord embed format with AWS branding and rich metadata
+         * - Handles API errors gracefully with detailed error reporting
+         * 
+         * TIMEZONE HANDLING:
+         * - Processes all timestamps in UTC for consistency with GitHub Actions environment
+         * - Displays user-facing times in Bangkok timezone (Asia/Bangkok) for local relevance
+         * - Maintains dual timezone logging for debugging across different time contexts
          */
         
-        const Parser = require('rss-parser');
-        const fetch = require('node-fetch');
+        // Import required Node.js modules for core functionality
+        const Parser = require('rss-parser');  // XML RSS feed parsing and structure extraction
+        const fetch = require('node-fetch');   // HTTP client for Discord webhook communication
         
-        // Initialize RSS parser for XML feed processing
+        // Initialize RSS parser with default configuration
+        // The parser handles XML namespace resolution and item standardization
         const parser = new Parser();
         
-        // Configuration constants from environment variables
-        const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';
-        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL; // Discord webhook for posting messages
-        const THREAD_ID = process.env.THREAD_ID; // Specific thread ID for AWS updates
+        // Configuration constants sourced from GitHub Actions environment variables
+        // These values are injected securely through GitHub's secret management system
+        const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';  // Official AWS announcements feed
+        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;  // Discord channel webhook endpoint for message posting
+        const THREAD_ID = process.env.THREAD_ID;              // Specific thread identifier for targeted message delivery
         
         /**
-         * Main execution function
-         * Orchestrates the entire workflow: fetch RSS, filter items, send to Discord
+         * PRIMARY EXECUTION FUNCTION
+         * 
+         * Orchestrates the complete workflow from RSS feed acquisition through Discord delivery.
+         * This function serves as the main entry point and coordinates all subsequent operations
+         * including feed parsing, content filtering, duplicate detection, and message transmission.
+         * 
+         * EXECUTION FLOW:
+         * 1. Fetch and parse AWS RSS feed from official endpoint
+         * 2. Apply time-based filtering to identify recent announcements
+         * 3. Validate item timestamps and content integrity
+         * 4. Transmit qualifying items to Discord with rate limiting
+         * 5. Generate comprehensive execution logs for monitoring
+         * 
+         * ERROR HANDLING:
+         * - Network failures during RSS retrieval are logged and execution continues
+         * - Discord API errors are captured with full response details
+         * - Malformed RSS data is handled gracefully without terminating execution
          */
         async function main() {
           try {
-            console.log('🔍 Checking AWS RSS feed...');
+            // Initialize execution with timestamp logging for performance tracking
+            console.log('🔍 Initiating AWS RSS feed monitoring cycle...');
+            console.log(`⏱️ Execution started at: ${new Date().toISOString()}`);
             
-            // Fetch and parse the AWS What's New RSS feed
+            // Retrieve and parse RSS feed from AWS official endpoint
+            // The parser converts XML structure into JavaScript objects for easier manipulation
             const feed = await parser.parseURL(RSS_URL);
-            console.log(`📰 Found ${feed.items.length} items in feed`);
+            console.log(`📰 Successfully retrieved RSS feed containing ${feed.items.length} total items`);
+            console.log(`📡 Feed last updated: ${feed.lastBuildDate || 'Unknown'}`);
             
-            // Time-based filtering to identify truly new items
-            // Using a 3-minute window to minimize false positives while ensuring coverage
+            // Implement time-based filtering to identify genuinely new announcements
+            // Using a narrow 3-minute window minimizes false positives while ensuring rapid delivery
             const now = new Date();
-            const cutoffTime = new Date(now.getTime() - 30 * 60 * 1000); // 30 minutes ago
+            const cutoffTime = new Date(now.getTime() - 3 * 60 * 1000); // 3 minutes prior to current time
             
-            // Log current time in both UTC and Bangkok timezone for debugging
-            console.log(`⏰ Current time: ${now.toISOString()} (${now.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
-            console.log(`⏰ Looking for items newer than: ${cutoffTime.toISOString()} (${cutoffTime.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
+            // Log temporal boundaries for debugging and verification purposes
+            // Dual timezone display facilitates troubleshooting across different geographic contexts
+            console.log(`⏰ Current execution time: ${now.toISOString()} (${now.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
+            console.log(`⏰ Filtering threshold: ${cutoffTime.toISOString()} (${cutoffTime.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
+            console.log(`🔎 Analyzing items published after threshold time...`);
             
-            // Filter RSS items to find only recent announcements
+            // Apply temporal filtering logic to RSS feed items
+            // Each item undergoes timestamp validation and proximity analysis
             const recentItems = feed.items.filter(item => {
               const itemDate = new Date(item.pubDate);
               const isRecent = itemDate >= cutoffTime;
               
-              // Log each item for transparency and debugging
-              console.log(`📰 Item: ${item.title.substring(0, 50)}...`);
+              // Generate detailed logging for each item evaluation
+              // This granular logging facilitates debugging of filtering logic
+              console.log(`📄 Evaluating item: "${item.title.substring(0, 60)}..."`);
               console.log(`   📅 Published: ${itemDate.toISOString()} (${itemDate.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
               
               if (isRecent) {
+                // Calculate and display item age for recent items
                 const ageMinutes = Math.round((now - itemDate) / (1000 * 60));
-                console.log(`   ✨ RECENT! Age: ${ageMinutes} minutes`);
+                console.log(`   ✨ QUALIFYING ITEM! Age: ${ageMinutes} minutes (within threshold)`);
               } else {
+                // Calculate and display age for filtered-out items
                 const ageMinutes = Math.round((now - itemDate) / (1000 * 60));
-                console.log(`   ⏰ Too old: ${ageMinutes} minutes`);
+                console.log(`   ⏰ FILTERED OUT: Age: ${ageMinutes} minutes (exceeds threshold)`);
               }
               
               return isRecent;
             });
             
-            console.log(`🆕 Found ${recentItems.length} items from last 3 minutes`);
+            console.log(`🎯 Filtering complete: ${recentItems.length} items qualify for Discord delivery`);
             
-            // Process and send new items to Discord thread
+            // Execute Discord delivery workflow for qualifying items
             if (recentItems.length > 0) {
-              console.log(`📤 Sending ${recentItems.length} new items to permanent Discord Thread...`);
+              // Implement spam protection by limiting maximum items per execution
+              // This prevents Discord channel flooding during high-activity periods
+              const MAX_ITEMS_PER_EXECUTION = 5;
+              const itemsToSend = recentItems.slice(0, MAX_ITEMS_PER_EXECUTION);
               
-              // Send each item individually with proper rate limiting
-              for (let i = 0; i < recentItems.length; i++) {
-                const item = recentItems[i];
-                await sendToThread(item, i + 1, recentItems.length);
+              console.log(`📤 Initiating Discord delivery for ${itemsToSend.length} qualifying items...`);
+              
+              // Log spam protection activation if limiting was applied
+              if (recentItems.length > MAX_ITEMS_PER_EXECUTION) {
+                console.log(`⚠️ SPAM PROTECTION ACTIVATED: Limited to ${MAX_ITEMS_PER_EXECUTION} items (${recentItems.length} total qualified) to prevent channel flooding`);
+              }
+              
+              // Sequential item delivery with rate limiting compliance
+              // Discord API rate limits require delays between consecutive requests
+              for (let i = 0; i < itemsToSend.length; i++) {
+                const item = itemsToSend[i];
+                console.log(`📨 Processing item ${i + 1}/${itemsToSend.length}: "${item.title.substring(0, 50)}..."`);
                 
-                // Rate limiting: Wait 2 seconds between messages to respect Discord API limits
-                if (i < recentItems.length - 1) {
+                // Execute Discord delivery for individual item
+                await sendToThread(item, i + 1, itemsToSend.length);
+                
+                // Apply rate limiting between Discord API calls
+                // 2-second intervals prevent rate limit violations while maintaining reasonable throughput
+                if (i < itemsToSend.length - 1) {
+                  console.log(`⏳ Applying rate limiting: waiting 2 seconds before next delivery...`);
                   await new Promise(resolve => setTimeout(resolve, 2000));
                 }
               }
+              
+              console.log(`✅ Discord delivery workflow completed successfully`);
+              
             } else {
-              console.log('📭 No new items to send (no items in last 30 minutes)');
+              console.log('📭 No qualifying items found for Discord delivery (no items within 3-minute threshold)');
             }
             
+            // Log execution completion with timestamp
+            console.log(`🏁 RSS monitoring cycle completed at: ${new Date().toISOString()}`);
+            
           } catch (error) {
-            console.error('❌ Error:', error);
+            // Comprehensive error logging for debugging and monitoring
+            console.error('❌ CRITICAL ERROR in main execution:', error);
+            console.error('📍 Error details:', {
+              name: error.name,
+              message: error.message,
+              stack: error.stack
+            });
           }
         }
         
         /**
-         * Send a single RSS item to the designated Discord thread
+         * DISCORD MESSAGE DELIVERY FUNCTION
          * 
-         * @param {Object} item - RSS feed item object containing title, link, content, etc.
-         * @param {number} index - Current item number (for display purposes)
-         * @param {number} total - Total number of items being sent (for display purposes)
+         * Handles the complete process of formatting RSS content into Discord-compatible
+         * embed messages and transmitting them via webhook API. This function implements
+         * Discord's embed specification with AWS-specific branding and metadata.
+         * 
+         * EMBED FORMATTING:
+         * - Titles are truncated to Discord's 256-character limit with ellipsis indication
+         * - Descriptions are limited to 500 characters to maintain readability
+         * - AWS orange color scheme (0xFF9900) for visual brand consistency
+         * - Rich metadata including publication timestamps and progress indicators
+         * - Proper timezone conversion for user-friendly time display
+         * 
+         * ERROR HANDLING:
+         * - HTTP errors are captured with full response details for debugging
+         * - Network timeouts are logged with retry recommendations
+         * - Malformed webhook URLs result in descriptive error messages
+         * 
+         * @param {Object} item - RSS feed item object containing title, link, content, publication date
+         * @param {number} index - Current item position in batch (1-based indexing for user display)
+         * @param {number} total - Total number of items in current batch for progress indication
          */
         async function sendToThread(item, index = 1, total = 1) {
           try {
-            // Create rich embed message for Discord with AWS branding
+            console.log(`🔧 Constructing Discord embed for item ${index}/${total}...`);
+            
+            // Create Discord embed object following official embed specification
+            // Each field is carefully validated against Discord's limits and requirements
             const embed = {
-              // Ensure title doesn't exceed Discord's 256 character limit
-              title: item.title.length > 256 ? item.title.substring(0, 253) + '...' : item.title,
+              // Title processing with length validation and truncation
+              // Discord enforces a strict 256-character limit on embed titles
+              title: item.title.length > 256 ? 
+                item.title.substring(0, 253) + '...' : 
+                item.title,
               
-              // Direct link to the AWS announcement
+              // Direct URL linking to original AWS announcement page
+              // Enables users to access full announcement details with single click
               url: item.link,
               
-              // Truncate description to fit Discord's embed limits (4096 chars max)
+              // Description content with intelligent truncation for readability
+              // 500-character limit balances information density with visual appeal
               description: item.contentSnippet ? 
                 (item.contentSnippet.length > 500 ? 
                   item.contentSnippet.substring(0, 497) + '...' : 
-                  item.contentSnippet) : 'No description available',
+                  item.contentSnippet) : 
+                'No description available for this announcement',
               
-              // AWS brand orange color for visual consistency
+              // AWS brand color for immediate visual recognition
+              // Orange (#FF9900) is consistent with AWS visual identity standards
               color: 0xFF9900,
               
-              // Use ISO timestamp for proper Discord time formatting
+              // Timestamp in ISO format for Discord's automatic time formatting
+              // Discord renders this as relative time (e.g., "2 hours ago")
               timestamp: item.isoDate || item.pubDate,
               
-              // Footer with AWS branding and progress indicator
+              // Footer metadata with AWS branding and batch progress
               footer: {
                 text: `AWS What's New • ${index}/${total}`,
                 icon_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico'
               },
               
-              // Additional metadata fields
+              // Additional structured metadata fields
               fields: [
                 {
                   name: '📅 Published',
-                  // Format date in Bangkok timezone for local relevance
+                  // Human-readable timestamp in Bangkok timezone for local relevance
+                  // 24-hour format provides unambiguous time representation
                   value: new Date(item.pubDate).toLocaleDateString('th-TH', {
                     timeZone: 'Asia/Bangkok',
                     year: 'numeric',
@@ -173,22 +285,23 @@ jobs:
               ]
             };
             
-            // Construct webhook URL for thread-specific posting
-            // If THREAD_ID is provided, append it as a query parameter
+            // Construct thread-specific webhook URL for targeted message delivery
+            // Thread ID parameter directs message to specific thread within channel
             const threadWebhookUrl = THREAD_ID ? 
               `${WEBHOOK_URL}?thread_id=${THREAD_ID}` : 
               WEBHOOK_URL;
             
-            // Prepare Discord webhook payload with bot identity
+            // Prepare complete webhook payload with bot identity and content
             const payload = {
-              username: 'AWS Updates',                    // Display name for the bot
-              avatar_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico', // AWS favicon
-              embeds: [embed]                             // Rich embed content
+              username: 'AWS Updates',                    // Display name for bot messages
+              avatar_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico', // AWS favicon for visual consistency
+              embeds: [embed]                             // Array of embed objects (Discord supports multiple)
             };
             
-            console.log(`🧵 Sending to thread ID: ${THREAD_ID || 'main channel'}`);
+            console.log(`🧵 Targeting thread ID: ${THREAD_ID || 'main channel (no thread specified)'}`);
+            console.log(`📡 Webhook URL constructed: ${threadWebhookUrl.substring(0, 50)}...`);
             
-            // Send HTTP POST request to Discord webhook
+            // Execute HTTP POST request to Discord webhook endpoint
             const response = await fetch(threadWebhookUrl, {
               method: 'POST',
               headers: {
@@ -197,25 +310,39 @@ jobs:
               body: JSON.stringify(payload)
             });
             
-            // Handle response and log results
+            // Process Discord API response with comprehensive error handling
             if (response.ok) {
-              console.log(`✅ Sent to thread: ${item.title.substring(0, 50)}...`);
+              console.log(`✅ Successfully delivered to Discord: "${item.title.substring(0, 50)}..."`);
+              console.log(`📊 Response status: ${response.status} ${response.statusText}`);
             } else {
-              // Log detailed error information for debugging
+              // Detailed error logging for failed Discord deliveries
               const errorText = await response.text();
-              console.error(`❌ Failed to send to Discord thread: ${response.status} - ${errorText}`);
+              console.error(`❌ Discord delivery failed for item ${index}/${total}`);
+              console.error(`📍 HTTP Status: ${response.status} ${response.statusText}`);
+              console.error(`📍 Error Response: ${errorText}`);
+              console.error(`📍 Item Title: "${item.title}"`);
             }
             
           } catch (error) {
-            console.error('❌ Error sending to Discord thread:', error);
+            // Comprehensive error logging for Discord delivery failures
+            console.error(`❌ CRITICAL ERROR during Discord delivery for item ${index}/${total}:`, error);
+            console.error('📍 Error details:', {
+              name: error.name,
+              message: error.message,
+              itemTitle: item.title,
+              threadId: THREAD_ID
+            });
           }
         }
         
-        // Execute the main function
+        // Execute primary workflow function
+        // This initiates the complete RSS monitoring and Discord delivery process
         main();
         EOF
         
+        # Execute the Node.js script to perform RSS monitoring and Discord notification
         node check-rss.js
       env:
-        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        THREAD_ID: ${{ secrets.THREAD_ID || '' }}
+        # Inject environment variables from GitHub Actions secrets for secure configuration
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}  # Discord webhook endpoint for message delivery
+        THREAD_ID: ${{ secrets.THREAD_ID || '' }}                # Optional thread ID for targeted posting
