@@ -66,8 +66,8 @@ jobs:
          * 
          * TIMEZONE HANDLING:
          * - Processes all timestamps in UTC for consistency with GitHub Actions environment
-         * - Displays user-facing times in Bangkok timezone (Asia/Bangkok) for local relevance
-         * - Maintains dual timezone logging for debugging across different time contexts
+         * - Displays timestamps in standard format without timezone conversion
+         * - Maintains clear timestamp logging for debugging across different contexts
          */
         
         // Import required Node.js modules for core functionality
@@ -121,9 +121,9 @@ jobs:
             const cutoffTime = new Date(now.getTime() - 3 * 60 * 1000); // 3 minutes prior to current time
             
             // Log temporal boundaries for debugging and verification purposes
-            // Dual timezone display facilitates troubleshooting across different geographic contexts
-            console.log(`⏰ Current execution time: ${now.toISOString()} (${now.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
-            console.log(`⏰ Filtering threshold: ${cutoffTime.toISOString()} (${cutoffTime.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
+            // Standard timezone display facilitates consistent troubleshooting
+            console.log(`⏰ Current execution time: ${now.toISOString()}`);
+            console.log(`⏰ Filtering threshold: ${cutoffTime.toISOString()}`);
             console.log(`🔎 Analyzing items published after threshold time...`);
             
             // Apply temporal filtering logic to RSS feed items
@@ -135,7 +135,7 @@ jobs:
               // Generate detailed logging for each item evaluation
               // This granular logging facilitates debugging of filtering logic
               console.log(`📄 Evaluating item: "${item.title.substring(0, 60)}..."`);
-              console.log(`   📅 Published: ${itemDate.toISOString()} (${itemDate.toLocaleString('th-TH', {timeZone: 'Asia/Bangkok'})} Bangkok)`);
+              console.log(`   📅 Published: ${itemDate.toISOString()}`);
               
               if (isRecent) {
                 // Calculate and display item age for recent items
@@ -269,17 +269,16 @@ jobs:
               fields: [
                 {
                   name: '📅 Published',
-                  // Human-readable timestamp in Bangkok timezone for local relevance
-                  // 24-hour format provides unambiguous time representation
-                  value: new Date(item.pubDate).toLocaleDateString('th-TH', {
-                    timeZone: 'Asia/Bangkok',
+                  // Human-readable timestamp in standard format
+                  // Using default timezone for consistency with system operations
+                  value: new Date(item.pubDate).toLocaleDateString('en-US', {
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric',
                     hour: '2-digit',
                     minute: '2-digit',
                     hour12: false
-                  }) + ' (Bangkok)',
+                  }),
                   inline: true
                 }
               ]
