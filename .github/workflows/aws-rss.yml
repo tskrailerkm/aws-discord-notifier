@@ -126,57 +126,63 @@ jobs:
             
             // Load previously sent message hashes
             const sentHashes = await loadSentHashes();
+            const isFirstRun = Object.keys(sentHashes).length === 0;
             
             // Fetch RSS feed
             const feed = await parser.parseURL(RSS_URL);
             console.log(`📰 Successfully retrieved RSS feed containing ${feed.items.length} total items`);
             
-            // Extended time window (24 hours) to catch items with stale publication dates
-            const now = new Date();
-            const cutoffTime = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours
+            // Different filtering strategy for first run vs subsequent runs
+            let newItems = [];
             
-            console.log(`⏰ Current execution time: ${now.toISOString()}`);
-            console.log(`⏰ Extended filtering threshold: ${cutoffTime.toISOString()}`);
-            
-            // Filter items by time AND check for duplicates
-            const newItems = [];
-            
-            for (const item of feed.items) {
-              const itemDate = new Date(item.pubDate);
-              const contentHash = generateContentHash(item);
+            if (isFirstRun) {
+              console.log('🚀 FIRST RUN DETECTED: Using 24-hour time filter for safety');
+              const now = new Date();
+              const cutoffTime = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours for first run
               
-              console.log(`📄 Evaluating: "${item.title.substring(0, 60)}..."`);
-              console.log(`   📅 Published: ${itemDate.toISOString()}`);
-              console.log(`   🔑 Content Hash: ${contentHash}`);
+              console.log(`⏰ First run cutoff time: ${cutoffTime.toISOString()}`);
               
-              // Check time filter (24-hour window)
-              if (itemDate < cutoffTime) {
-                const ageHours = Math.round((now - itemDate) / (1000 * 60 * 60));
-                console.log(`   ⏰ FILTERED OUT: Age: ${ageHours} hours (exceeds 24-hour threshold)`);
-                continue;
+              for (const item of feed.items) {
+                const itemDate = new Date(item.pubDate);
+                const contentHash = generateContentHash(item);
+                
+                console.log(`📄 Evaluating: "${item.title.substring(0, 60)}..."`);
+                console.log(`   📅 Published: ${itemDate.toISOString()}`);
+                console.log(`   🔑 Content Hash: ${contentHash}`);
+                
+                if (itemDate >= cutoffTime) {
+                  const ageHours = Math.round((now - itemDate) / (1000 * 60 * 60));
+                  console.log(`   ✨ FIRST RUN QUALIFIED! Age: ${ageHours} hours`);
+                  newItems.push({ ...item, contentHash });
+                } else {
+                  const ageHours = Math.round((now - itemDate) / (1000 * 60 * 60));
+                  console.log(`   ⏰ FILTERED OUT: Age: ${ageHours} hours (first run protection)`);
+                }
               }
+            } else {
+              console.log('🔄 SUBSEQUENT RUN: Using hash-only filtering');
               
-              // Check duplicate filter
-              if (sentHashes[contentHash]) {
-                console.log(`   🚫 DUPLICATE DETECTED: Already sent on ${sentHashes[contentHash]}`);
-                continue;
+              for (const item of feed.items) {
+                const contentHash = generateContentHash(item);
+                
+                console.log(`📄 Evaluating: "${item.title.substring(0, 60)}..."`);
+                console.log(`   🔑 Content Hash: ${contentHash}`);
+                
+                // Pure hash-based filtering for subsequent runs
+                if (sentHashes[contentHash]) {
+                  console.log(`   🚫 DUPLICATE DETECTED: Already sent on ${sentHashes[contentHash]}`);
+                } else {
+                  console.log(`   ✨ NEW ITEM QUALIFIED! (Hash not found)`);
+                  newItems.push({ ...item, contentHash });
+                }
               }
-              
-              // Item passes both filters
-              const ageMinutes = Math.round((now - itemDate) / (1000 * 60));
-              console.log(`   ✨ NEW ITEM QUALIFIED! Age: ${ageMinutes} minutes`);
-              
-              newItems.push({
-                ...item,
-                contentHash
-              });
             }
             
             console.log(`🎯 Filtering complete: ${newItems.length} new items qualify for Discord delivery`);
             
             if (newItems.length > 0) {
               // Apply spam protection
-              const MAX_ITEMS_PER_EXECUTION = 5;
+              const MAX_ITEMS_PER_EXECUTION = 10;
               const itemsToSend = newItems.slice(0, MAX_ITEMS_PER_EXECUTION);
               
               console.log(`📤 Initiating Discord delivery for ${itemsToSend.length} new items...`);
