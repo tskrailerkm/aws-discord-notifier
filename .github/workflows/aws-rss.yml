@@ -103,10 +103,16 @@ jobs:
             console.log(`💾 Saved ${Object.keys(hashes).length} hash records to storage`);
             console.log(`📁 File size: ${hashContent.length} bytes`);
             console.log(`📄 File path: ${SENT_HASHES_FILE}`);
+            console.log(`📄 File content written: ${hashContent}`);
             
-            // Verify file was created
+            // Verify file was created and read it back
             const exists = await fs.access(SENT_HASHES_FILE).then(() => true).catch(() => false);
             console.log(`✅ File exists after save: ${exists}`);
+            
+            if (exists) {
+              const readBack = await fs.readFile(SENT_HASHES_FILE, 'utf8');
+              console.log(`🔍 File content read back: ${readBack}`);
+            }
           } catch (error) {
             console.error('❌ Failed to save hash file:', error);
             console.error('📍 Error details:', error.message);
@@ -313,19 +319,34 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         
+        echo "🔍 Checking current directory contents:"
+        ls -la
+        
         # Check if hash file exists and add it
         if [ -f "sent_messages_hashes.json" ]; then
           echo "📁 Hash file found, checking contents..."
+          echo "📄 File size: $(wc -c < sent_messages_hashes.json) bytes"
           echo "📄 File contents:"
           cat sent_messages_hashes.json
+          echo "--- End of file contents ---"
+          
+          # Check git status before adding
+          echo "📊 Git status before adding file:"
+          git status
           
           git add sent_messages_hashes.json
+          
+          # Check git status after adding
+          echo "📊 Git status after adding file:"
+          git status
           
           # Check if there are changes to commit
           if git diff --staged --quiet; then
             echo "📭 No changes to commit (file unchanged)"
+            echo "🔍 Checking if file was already committed:"
+            git log --oneline -n 5
           else
-            echo "💾 Committing hash file changes..."
+            echo "💾 File has changes, committing..."
             # Create descriptive commit message with timestamp
             TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
             HASH_COUNT=$(jq length sent_messages_hashes.json 2>/dev/null || echo "unknown")
@@ -333,17 +354,18 @@ jobs:
             git commit -m "📊 AWS Bot: Update message hashes (${HASH_COUNT} total) - ${TIMESTAMP} [skip ci]"
             
             # Try to push with error handling
+            echo "🚀 Attempting to push to repository..."
             if git push; then
               echo "✅ Successfully pushed hash file to repository"
             else
-              echo "❌ Failed to push to repository. This might be due to:"
-              echo "   - Branch protection rules"
-              echo "   - Insufficient GitHub Actions permissions"
-              echo "   - Repository settings"
-              echo "📝 The bot will still work, but won't persist hash data between runs"
+              echo "❌ Failed to push to repository. Error details:"
+              git status
+              echo "📝 Repository permissions or branch protection may be preventing push"
             fi
           fi
         else
-          echo "📭 No hash file generated (no messages were sent)"
+          echo "📭 No hash file generated"
+          echo "🔍 Current directory contents:"
+          ls -la
         fi
-      continue-on-error: true  # Don't fail the entire workflow if git operations fail
+      continue-on-error: true
