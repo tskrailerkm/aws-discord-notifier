@@ -98,10 +98,18 @@ jobs:
         
         async function saveSentHashes(hashes) {
           try {
-            await fs.writeFile(SENT_HASHES_FILE, JSON.stringify(hashes, null, 2));
+            const hashContent = JSON.stringify(hashes, null, 2);
+            await fs.writeFile(SENT_HASHES_FILE, hashContent);
             console.log(`💾 Saved ${Object.keys(hashes).length} hash records to storage`);
+            console.log(`📁 File size: ${hashContent.length} bytes`);
+            console.log(`📄 File path: ${SENT_HASHES_FILE}`);
+            
+            // Verify file was created
+            const exists = await fs.access(SENT_HASHES_FILE).then(() => true).catch(() => false);
+            console.log(`✅ File exists after save: ${exists}`);
           } catch (error) {
             console.error('❌ Failed to save hash file:', error);
+            console.error('📍 Error details:', error.message);
           }
         }
         
@@ -197,6 +205,13 @@ jobs:
               
               // Update hash storage with successful deliveries
               Object.assign(sentHashes, successfulHashes);
+              
+              // Force save even if no new items (for testing)
+              if (Object.keys(successfulHashes).length === 0 && Object.keys(sentHashes).length === 0) {
+                console.log('🧪 TESTING MODE: Creating empty hash file for debugging');
+                sentHashes['debug_empty_' + Date.now()] = now.toISOString();
+              }
+              
               await saveSentHashes(sentHashes);
               
               console.log(`✅ Discord delivery completed: ${Object.keys(successfulHashes).length} new items sent`);
@@ -300,15 +315,22 @@ jobs:
         
         # Check if hash file exists and add it
         if [ -f "sent_messages_hashes.json" ]; then
-          echo "📁 Hash file found, adding to git..."
+          echo "📁 Hash file found, checking contents..."
+          echo "📄 File contents:"
+          cat sent_messages_hashes.json
+          
           git add sent_messages_hashes.json
           
           # Check if there are changes to commit
           if git diff --staged --quiet; then
-            echo "📭 No changes to commit"
+            echo "📭 No changes to commit (file unchanged)"
           else
             echo "💾 Committing hash file changes..."
-            git commit -m "Update sent messages hash tracking [skip ci]"
+            # Create descriptive commit message with timestamp
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+            HASH_COUNT=$(jq length sent_messages_hashes.json 2>/dev/null || echo "unknown")
+            
+            git commit -m "📊 AWS Bot: Update message hashes (${HASH_COUNT} total) - ${TIMESTAMP} [skip ci]"
             
             # Try to push with error handling
             if git push; then
