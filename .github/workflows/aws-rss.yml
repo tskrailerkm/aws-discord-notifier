@@ -196,7 +196,7 @@ jobs:
             
             if (newItems.length > 0) {
               // Apply stricter spam protection
-              const MAX_ITEMS_PER_EXECUTION = 3;  // Reduced from 5 to 3 for better safety
+              const MAX_ITEMS_PER_EXECUTION = 5;  // Reduced from 5 to 3 for better safety
               const itemsToSend = newItems.slice(0, MAX_ITEMS_PER_EXECUTION);
               
               console.log(`📤 Initiating Discord delivery for ${itemsToSend.length} new items...`);
