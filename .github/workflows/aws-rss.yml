@@ -122,7 +122,8 @@ jobs:
         async function main() {
           try {
             console.log('🔍 Initiating AWS RSS feed monitoring cycle...');
-            console.log(`⏱️ Execution started at: ${new Date().toISOString()}`);
+            const now = new Date(); // Define now at the top level
+            console.log(`⏱️ Execution started at: ${now.toISOString()}`);
             
             // Load previously sent message hashes
             const sentHashes = await loadSentHashes();
@@ -137,7 +138,6 @@ jobs:
             
             if (isFirstRun) {
               console.log('🚀 FIRST RUN DETECTED: Using 24-hour time filter for safety');
-              const now = new Date();
               const cutoffTime = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours for first run
               
               console.log(`⏰ First run cutoff time: ${cutoffTime.toISOString()}`);
@@ -160,19 +160,33 @@ jobs:
                 }
               }
             } else {
-              console.log('🔄 SUBSEQUENT RUN: Using hash-only filtering');
+              console.log('🔄 SUBSEQUENT RUN: Using hash + time safety filter');
+              
+              // Even in subsequent runs, use time window as safety net to prevent sending very old items
+              const safetyWindow = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days safety window
+              console.log(`⚠️ Safety time window: ${safetyWindow.toISOString()} (preventing very old items)`);
               
               for (const item of feed.items) {
+                const itemDate = new Date(item.pubDate);
                 const contentHash = generateContentHash(item);
                 
                 console.log(`📄 Evaluating: "${item.title.substring(0, 60)}..."`);
+                console.log(`   📅 Published: ${itemDate.toISOString()}`);
                 console.log(`   🔑 Content Hash: ${contentHash}`);
                 
-                // Pure hash-based filtering for subsequent runs
+                // Check safety time window first (prevent very old items)
+                if (itemDate < safetyWindow) {
+                  const ageDays = Math.round((now - itemDate) / (1000 * 60 * 60 * 24));
+                  console.log(`   🛡️ SAFETY FILTERED: Age: ${ageDays} days (exceeds 7-day safety window)`);
+                  continue;
+                }
+                
+                // Then check hash-based filtering
                 if (sentHashes[contentHash]) {
                   console.log(`   🚫 DUPLICATE DETECTED: Already sent on ${sentHashes[contentHash]}`);
                 } else {
-                  console.log(`   ✨ NEW ITEM QUALIFIED! (Hash not found)`);
+                  const ageHours = Math.round((now - itemDate) / (1000 * 60 * 60));
+                  console.log(`   ✨ NEW ITEM QUALIFIED! Age: ${ageHours} hours (hash not found)`);
                   newItems.push({ ...item, contentHash });
                 }
               }
@@ -181,14 +195,15 @@ jobs:
             console.log(`🎯 Filtering complete: ${newItems.length} new items qualify for Discord delivery`);
             
             if (newItems.length > 0) {
-              // Apply spam protection
-              const MAX_ITEMS_PER_EXECUTION = 10;
+              // Apply stricter spam protection
+              const MAX_ITEMS_PER_EXECUTION = 3;  // Reduced from 5 to 3 for better safety
               const itemsToSend = newItems.slice(0, MAX_ITEMS_PER_EXECUTION);
               
               console.log(`📤 Initiating Discord delivery for ${itemsToSend.length} new items...`);
               
               if (newItems.length > MAX_ITEMS_PER_EXECUTION) {
                 console.log(`⚠️ SPAM PROTECTION: Limited to ${MAX_ITEMS_PER_EXECUTION} items (${newItems.length} total qualified)`);
+                console.log(`📝 Remaining ${newItems.length - MAX_ITEMS_PER_EXECUTION} items will be processed in next cycles`);
               }
               
               // Send items to Discord and track successful deliveries
