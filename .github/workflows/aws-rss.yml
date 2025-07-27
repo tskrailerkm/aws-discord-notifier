@@ -1,276 +1,240 @@
-name: AWS RSS to Discord (Single Thread)
+name: AWS RSS to Discord (Single Thread) - Fixed Duplicates
 
 on:
   schedule:
     # Execute every 30 minutes to check for new AWS announcements
-    # Using 30-minute intervals provides good coverage while reducing system load
-    # and minimizing redundant checks during quiet periods
     - cron: '*/30 * * * *'
-  workflow_dispatch: # Enable manual execution for testing and troubleshooting purposes
+  workflow_dispatch: # Enable manual execution for testing
 
 jobs:
   check-rss:
     runs-on: ubuntu-latest
     
     steps:
-    # Configure Node.js runtime environment for RSS parsing and HTTP operations
-    # Using Node.js 18 for optimal compatibility with npm packages and modern JavaScript features
+    # Configure Node.js runtime environment
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        # Important: Use a token that can push to the repository
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         
-    # Install required Node.js packages for core functionality
-    # rss-parser: XML RSS feed parsing and item extraction
-    # node-fetch@2: HTTP requests to Discord webhook API (v2 for compatibility)
     - name: Install dependencies
       run: |
-        # Initialize a new Node.js project with default configuration
         npm init -y
-        # Install essential packages for RSS parsing and HTTP communication
-        npm install rss-parser node-fetch@2
+        npm install rss-parser node-fetch@2 crypto
         
-    # Primary workflow execution: RSS monitoring and Discord notification
-    # This step contains the complete logic for feed processing and message delivery
     - name: Check RSS and send to Discord
       run: |
         cat << 'EOF' > check-rss.js
         /**
-         * AWS RSS to Discord Bot - Single Permanent Thread Implementation
+         * AWS RSS to Discord Bot - Enhanced with Duplicate Prevention
          * 
-         * OVERVIEW:
-         * This automated bot monitors the official AWS "What's New" RSS feed and delivers
-         * real-time notifications of new AWS service announcements, feature updates, and
-         * regional expansions to a designated Discord thread. The implementation prioritizes
-         * reliability, spam prevention, and accurate duplicate detection.
-         * 
-         * CORE FUNCTIONALITY:
-         * - Fetches AWS RSS feed every 30 minutes via scheduled GitHub Actions
-         * - Implements time-based filtering (3-minute window) to identify genuinely new content
-         * - Prevents duplicate notifications through temporal proximity analysis
-         * - Delivers rich, formatted embed messages to a specific Discord thread
-         * - Provides comprehensive logging for monitoring and debugging
-         * - Includes multiple spam protection mechanisms and rate limiting
-         * 
-         * ANTI-SPAM STRATEGY:
-         * - Time-window filtering: Only items published within last 3 minutes are considered
-         * - Quantity limiting: Maximum 5 items per execution to prevent Discord flooding
-         * - Rate limiting: 2-second delays between consecutive Discord API calls
-         * - Age verification: Rejects items older than reasonable timeframes
-         * 
-         * DISCORD INTEGRATION:
-         * - Uses webhook API for seamless message delivery without bot presence
-         * - Supports thread-specific posting via thread_id parameter
-         * - Implements Discord embed format with AWS branding and rich metadata
-         * - Handles API errors gracefully with detailed error reporting
-         * 
-         * TIMEZONE HANDLING:
-         * - Processes all timestamps in UTC for consistency with GitHub Actions environment
-         * - Displays timestamps in standard format without timezone conversion
-         * - Maintains clear timestamp logging for debugging across different contexts
+         * IMPROVEMENTS FROM ORIGINAL:
+         * - Uses content hashing to prevent duplicate messages
+         * - Stores sent message hashes in git repository for persistence
+         * - Combines time-based filtering with content-based deduplication
+         * - Handles RSS feed inconsistencies and stale publication dates
+         * - Maintains backward compatibility with existing configuration
          */
         
-        // Import required Node.js modules for core functionality
-        const Parser = require('rss-parser');  // XML RSS feed parsing and structure extraction
-        const fetch = require('node-fetch');   // HTTP client for Discord webhook communication
+        const Parser = require('rss-parser');
+        const fetch = require('node-fetch');
+        const crypto = require('crypto');
+        const fs = require('fs').promises;
+        const path = require('path');
         
-        // Initialize RSS parser with default configuration
-        // The parser handles XML namespace resolution and item standardization
         const parser = new Parser();
         
-        // Configuration constants sourced from GitHub Actions environment variables
-        // These values are injected securely through GitHub's secret management system
-        const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';  // Official AWS announcements feed
-        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;  // Discord channel webhook endpoint for message posting
-        const THREAD_ID = process.env.THREAD_ID;              // Specific thread identifier for targeted message delivery
+        // Configuration constants
+        const RSS_URL = 'https://aws.amazon.com/about-aws/whats-new/recent/feed/';
+        const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+        const THREAD_ID = process.env.THREAD_ID;
+        const SENT_HASHES_FILE = 'sent_messages_hashes.json';
         
         /**
-         * PRIMARY EXECUTION FUNCTION
+         * ENHANCED DUPLICATE PREVENTION STRATEGY
          * 
-         * Orchestrates the complete workflow from RSS feed acquisition through Discord delivery.
-         * This function serves as the main entry point and coordinates all subsequent operations
-         * including feed parsing, content filtering, duplicate detection, and message transmission.
+         * This implementation uses a two-layer approach:
+         * 1. Time-based filtering (extended to 24 hours for safety)
+         * 2. Content hash-based deduplication using persistent storage
          * 
-         * EXECUTION FLOW:
-         * 1. Fetch and parse AWS RSS feed from official endpoint
-         * 2. Apply time-based filtering to identify recent announcements
-         * 3. Validate item timestamps and content integrity
-         * 4. Transmit qualifying items to Discord with rate limiting
-         * 5. Generate comprehensive execution logs for monitoring
-         * 
-         * ERROR HANDLING:
-         * - Network failures during RSS retrieval are logged and execution continues
-         * - Discord API errors are captured with full response details
-         * - Malformed RSS data is handled gracefully without terminating execution
+         * The content hash is generated from title + link + publication date
+         * to ensure uniqueness while handling RSS feed inconsistencies.
          */
+        
+        function generateContentHash(item) {
+          // Create unique identifier combining title, link, and publication date
+          const content = `${item.title}|${item.link}|${item.pubDate}`;
+          return crypto.createHash('sha256').update(content).digest('hex').substring(0, 16);
+        }
+        
+        async function loadSentHashes() {
+          try {
+            const data = await fs.readFile(SENT_HASHES_FILE, 'utf8');
+            const hashData = JSON.parse(data);
+            
+            // Clean up old hashes (older than 7 days) to prevent file bloat
+            const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            const cleanedHashes = {};
+            
+            for (const [hash, timestamp] of Object.entries(hashData)) {
+              if (new Date(timestamp) > oneWeekAgo) {
+                cleanedHashes[hash] = timestamp;
+              }
+            }
+            
+            console.log(`📚 Loaded ${Object.keys(cleanedHashes).length} hash records from storage`);
+            return cleanedHashes;
+          } catch (error) {
+            console.log('📝 No existing hash file found, starting fresh');
+            return {};
+          }
+        }
+        
+        async function saveSentHashes(hashes) {
+          try {
+            await fs.writeFile(SENT_HASHES_FILE, JSON.stringify(hashes, null, 2));
+            console.log(`💾 Saved ${Object.keys(hashes).length} hash records to storage`);
+          } catch (error) {
+            console.error('❌ Failed to save hash file:', error);
+          }
+        }
+        
         async function main() {
           try {
-            // Initialize execution with timestamp logging for performance tracking
             console.log('🔍 Initiating AWS RSS feed monitoring cycle...');
             console.log(`⏱️ Execution started at: ${new Date().toISOString()}`);
             
-            // Retrieve and parse RSS feed from AWS official endpoint
-            // The parser converts XML structure into JavaScript objects for easier manipulation
+            // Load previously sent message hashes
+            const sentHashes = await loadSentHashes();
+            
+            // Fetch RSS feed
             const feed = await parser.parseURL(RSS_URL);
             console.log(`📰 Successfully retrieved RSS feed containing ${feed.items.length} total items`);
-            console.log(`📡 Feed last updated: ${feed.lastBuildDate || 'Unknown'}`);
             
-            // Implement time-based filtering to identify genuinely new announcements
-            // Using a narrow 3-minute window minimizes false positives while ensuring rapid delivery
+            // Extended time window (24 hours) to catch items with stale publication dates
             const now = new Date();
-            const cutoffTime = new Date(now.getTime() - 3 * 60 * 1000); // 3 minutes prior to current time
+            const cutoffTime = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours
             
-            // Log temporal boundaries for debugging and verification purposes
-            // Standard timezone display facilitates consistent troubleshooting
             console.log(`⏰ Current execution time: ${now.toISOString()}`);
-            console.log(`⏰ Filtering threshold: ${cutoffTime.toISOString()}`);
-            console.log(`🔎 Analyzing items published after threshold time...`);
+            console.log(`⏰ Extended filtering threshold: ${cutoffTime.toISOString()}`);
             
-            // Apply temporal filtering logic to RSS feed items
-            // Each item undergoes timestamp validation and proximity analysis
-            const recentItems = feed.items.filter(item => {
+            // Filter items by time AND check for duplicates
+            const newItems = [];
+            
+            for (const item of feed.items) {
               const itemDate = new Date(item.pubDate);
-              const isRecent = itemDate >= cutoffTime;
+              const contentHash = generateContentHash(item);
               
-              // Generate detailed logging for each item evaluation
-              // This granular logging facilitates debugging of filtering logic
-              console.log(`📄 Evaluating item: "${item.title.substring(0, 60)}..."`);
+              console.log(`📄 Evaluating: "${item.title.substring(0, 60)}..."`);
               console.log(`   📅 Published: ${itemDate.toISOString()}`);
+              console.log(`   🔑 Content Hash: ${contentHash}`);
               
-              if (isRecent) {
-                // Calculate and display item age for recent items
-                const ageMinutes = Math.round((now - itemDate) / (1000 * 60));
-                console.log(`   ✨ QUALIFYING ITEM! Age: ${ageMinutes} minutes (within threshold)`);
-              } else {
-                // Calculate and display age for filtered-out items
-                const ageMinutes = Math.round((now - itemDate) / (1000 * 60));
-                console.log(`   ⏰ FILTERED OUT: Age: ${ageMinutes} minutes (exceeds threshold)`);
+              // Check time filter (24-hour window)
+              if (itemDate < cutoffTime) {
+                const ageHours = Math.round((now - itemDate) / (1000 * 60 * 60));
+                console.log(`   ⏰ FILTERED OUT: Age: ${ageHours} hours (exceeds 24-hour threshold)`);
+                continue;
               }
               
-              return isRecent;
-            });
+              // Check duplicate filter
+              if (sentHashes[contentHash]) {
+                console.log(`   🚫 DUPLICATE DETECTED: Already sent on ${sentHashes[contentHash]}`);
+                continue;
+              }
+              
+              // Item passes both filters
+              const ageMinutes = Math.round((now - itemDate) / (1000 * 60));
+              console.log(`   ✨ NEW ITEM QUALIFIED! Age: ${ageMinutes} minutes`);
+              
+              newItems.push({
+                ...item,
+                contentHash
+              });
+            }
             
-            console.log(`🎯 Filtering complete: ${recentItems.length} items qualify for Discord delivery`);
+            console.log(`🎯 Filtering complete: ${newItems.length} new items qualify for Discord delivery`);
             
-            // Execute Discord delivery workflow for qualifying items
-            if (recentItems.length > 0) {
-              // Implement spam protection by limiting maximum items per execution
-              // This prevents Discord channel flooding during high-activity periods
+            if (newItems.length > 0) {
+              // Apply spam protection
               const MAX_ITEMS_PER_EXECUTION = 5;
-              const itemsToSend = recentItems.slice(0, MAX_ITEMS_PER_EXECUTION);
+              const itemsToSend = newItems.slice(0, MAX_ITEMS_PER_EXECUTION);
               
-              console.log(`📤 Initiating Discord delivery for ${itemsToSend.length} qualifying items...`);
+              console.log(`📤 Initiating Discord delivery for ${itemsToSend.length} new items...`);
               
-              // Log spam protection activation if limiting was applied
-              if (recentItems.length > MAX_ITEMS_PER_EXECUTION) {
-                console.log(`⚠️ SPAM PROTECTION ACTIVATED: Limited to ${MAX_ITEMS_PER_EXECUTION} items (${recentItems.length} total qualified) to prevent channel flooding`);
+              if (newItems.length > MAX_ITEMS_PER_EXECUTION) {
+                console.log(`⚠️ SPAM PROTECTION: Limited to ${MAX_ITEMS_PER_EXECUTION} items (${newItems.length} total qualified)`);
               }
               
-              // Sequential item delivery with rate limiting compliance
-              // Discord API rate limits require delays between consecutive requests
+              // Send items to Discord and track successful deliveries
+              const successfulHashes = {};
+              
               for (let i = 0; i < itemsToSend.length; i++) {
                 const item = itemsToSend[i];
                 console.log(`📨 Processing item ${i + 1}/${itemsToSend.length}: "${item.title.substring(0, 50)}..."`);
                 
-                // Execute Discord delivery for individual item
-                await sendToThread(item, i + 1, itemsToSend.length);
+                const success = await sendToThread(item, i + 1, itemsToSend.length);
                 
-                // Apply rate limiting between Discord API calls
-                // 2-second intervals prevent rate limit violations while maintaining reasonable throughput
+                if (success) {
+                  // Mark as sent only if Discord delivery succeeded
+                  successfulHashes[item.contentHash] = now.toISOString();
+                  console.log(`✅ Item ${i + 1} delivered and marked as sent`);
+                } else {
+                  console.log(`❌ Item ${i + 1} failed to deliver, will retry next cycle`);
+                }
+                
+                // Rate limiting
                 if (i < itemsToSend.length - 1) {
-                  console.log(`⏳ Applying rate limiting: waiting 2 seconds before next delivery...`);
+                  console.log(`⏳ Rate limiting: waiting 2 seconds...`);
                   await new Promise(resolve => setTimeout(resolve, 2000));
                 }
               }
               
-              console.log(`✅ Discord delivery workflow completed successfully`);
+              // Update hash storage with successful deliveries
+              Object.assign(sentHashes, successfulHashes);
+              await saveSentHashes(sentHashes);
+              
+              console.log(`✅ Discord delivery completed: ${Object.keys(successfulHashes).length} new items sent`);
               
             } else {
-              console.log('📭 No qualifying items found for Discord delivery (no items within 3-minute threshold)');
+              console.log('📭 No new items found for Discord delivery');
             }
             
-            // Log execution completion with timestamp
             console.log(`🏁 RSS monitoring cycle completed at: ${new Date().toISOString()}`);
             
           } catch (error) {
-            // Comprehensive error logging for debugging and monitoring
             console.error('❌ CRITICAL ERROR in main execution:', error);
-            console.error('📍 Error details:', {
-              name: error.name,
-              message: error.message,
-              stack: error.stack
-            });
           }
         }
         
-        /**
-         * DISCORD MESSAGE DELIVERY FUNCTION
-         * 
-         * Handles the complete process of formatting RSS content into Discord-compatible
-         * embed messages and transmitting them via webhook API. This function implements
-         * Discord's embed specification with AWS-specific branding and metadata.
-         * 
-         * EMBED FORMATTING:
-         * - Titles are truncated to Discord's 256-character limit with ellipsis indication
-         * - Descriptions are limited to 500 characters to maintain readability
-         * - AWS orange color scheme (0xFF9900) for visual brand consistency
-         * - Rich metadata including publication timestamps and progress indicators
-         * - Proper timezone conversion for user-friendly time display
-         * 
-         * ERROR HANDLING:
-         * - HTTP errors are captured with full response details for debugging
-         * - Network timeouts are logged with retry recommendations
-         * - Malformed webhook URLs result in descriptive error messages
-         * 
-         * @param {Object} item - RSS feed item object containing title, link, content, publication date
-         * @param {number} index - Current item position in batch (1-based indexing for user display)
-         * @param {number} total - Total number of items in current batch for progress indication
-         */
         async function sendToThread(item, index = 1, total = 1) {
           try {
             console.log(`🔧 Constructing Discord embed for item ${index}/${total}...`);
             
-            // Create Discord embed object following official embed specification
-            // Each field is carefully validated against Discord's limits and requirements
             const embed = {
-              // Title processing with length validation and truncation
-              // Discord enforces a strict 256-character limit on embed titles
               title: item.title.length > 256 ? 
                 item.title.substring(0, 253) + '...' : 
                 item.title,
-              
-              // Direct URL linking to original AWS announcement page
-              // Enables users to access full announcement details with single click
               url: item.link,
-              
-              // Description content with intelligent truncation for readability
-              // 500-character limit balances information density with visual appeal
               description: item.contentSnippet ? 
                 (item.contentSnippet.length > 500 ? 
                   item.contentSnippet.substring(0, 497) + '...' : 
                   item.contentSnippet) : 
                 'No description available for this announcement',
-              
-              // AWS brand color for immediate visual recognition
-              // Orange (#FF9900) is consistent with AWS visual identity standards
               color: 0xFF9900,
-              
-              // Timestamp in ISO format for Discord's automatic time formatting
-              // Discord renders this as relative time (e.g., "2 hours ago")
               timestamp: item.isoDate || item.pubDate,
-              
-              // Footer metadata with AWS branding and batch progress
               footer: {
                 text: `AWS What's New • ${index}/${total}`,
                 icon_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico'
               },
-              
-              // Additional structured metadata fields
               fields: [
                 {
                   name: '📅 Published',
-                  // Human-readable timestamp in standard format
-                  // Using default timezone for consistency with system operations
                   value: new Date(item.pubDate).toLocaleDateString('en-US', {
                     year: 'numeric',
                     month: 'long',
@@ -284,23 +248,16 @@ jobs:
               ]
             };
             
-            // Construct thread-specific webhook URL for targeted message delivery
-            // Thread ID parameter directs message to specific thread within channel
             const threadWebhookUrl = THREAD_ID ? 
               `${WEBHOOK_URL}?thread_id=${THREAD_ID}` : 
               WEBHOOK_URL;
             
-            // Prepare complete webhook payload with bot identity and content
             const payload = {
-              username: 'AWS Updates',                    // Display name for bot messages
-              avatar_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico', // AWS favicon for visual consistency
-              embeds: [embed]                             // Array of embed objects (Discord supports multiple)
+              username: 'AWS Updates',
+              avatar_url: 'https://a0.awsstatic.com/libra-css/images/site/fav/favicon.ico',
+              embeds: [embed]
             };
             
-            console.log(`🧵 Targeting thread ID: ${THREAD_ID || 'main channel (no thread specified)'}`);
-            console.log(`📡 Webhook URL constructed: ${threadWebhookUrl.substring(0, 50)}...`);
-            
-            // Execute HTTP POST request to Discord webhook endpoint
             const response = await fetch(threadWebhookUrl, {
               method: 'POST',
               headers: {
@@ -309,39 +266,62 @@ jobs:
               body: JSON.stringify(payload)
             });
             
-            // Process Discord API response with comprehensive error handling
             if (response.ok) {
               console.log(`✅ Successfully delivered to Discord: "${item.title.substring(0, 50)}..."`);
-              console.log(`📊 Response status: ${response.status} ${response.statusText}`);
+              return true;
             } else {
-              // Detailed error logging for failed Discord deliveries
               const errorText = await response.text();
               console.error(`❌ Discord delivery failed for item ${index}/${total}`);
               console.error(`📍 HTTP Status: ${response.status} ${response.statusText}`);
               console.error(`📍 Error Response: ${errorText}`);
-              console.error(`📍 Item Title: "${item.title}"`);
+              return false;
             }
             
           } catch (error) {
-            // Comprehensive error logging for Discord delivery failures
             console.error(`❌ CRITICAL ERROR during Discord delivery for item ${index}/${total}:`, error);
-            console.error('📍 Error details:', {
-              name: error.name,
-              message: error.message,
-              itemTitle: item.title,
-              threadId: THREAD_ID
-            });
+            return false;
           }
         }
         
-        // Execute primary workflow function
-        // This initiates the complete RSS monitoring and Discord delivery process
         main();
         EOF
         
-        # Execute the Node.js script to perform RSS monitoring and Discord notification
         node check-rss.js
       env:
-        # Inject environment variables from GitHub Actions secrets for secure configuration
-        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}  # Discord webhook endpoint for message delivery
-        THREAD_ID: ${{ secrets.THREAD_ID || '' }}                # Optional thread ID for targeted posting
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        THREAD_ID: ${{ secrets.THREAD_ID || '' }}
+        
+    # Commit the hash file back to repository for persistence
+    - name: Commit hash file
+      run: |
+        # Configure git
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Check if hash file exists and add it
+        if [ -f "sent_messages_hashes.json" ]; then
+          echo "📁 Hash file found, adding to git..."
+          git add sent_messages_hashes.json
+          
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "📭 No changes to commit"
+          else
+            echo "💾 Committing hash file changes..."
+            git commit -m "Update sent messages hash tracking [skip ci]"
+            
+            # Try to push with error handling
+            if git push; then
+              echo "✅ Successfully pushed hash file to repository"
+            else
+              echo "❌ Failed to push to repository. This might be due to:"
+              echo "   - Branch protection rules"
+              echo "   - Insufficient GitHub Actions permissions"
+              echo "   - Repository settings"
+              echo "📝 The bot will still work, but won't persist hash data between runs"
+            fi
+          fi
+        else
+          echo "📭 No hash file generated (no messages were sent)"
+        fi
+      continue-on-error: true  # Don't fail the entire workflow if git operations fail
