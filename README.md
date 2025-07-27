@@ -12,25 +12,25 @@ An automated monitoring system that delivers real-time AWS service announcements
 ### Core Functionality
 - **🔄 Automated Monitoring**: Checks AWS RSS feed every 30 minutes via GitHub Actions
 - **🎯 Thread-Specific Delivery**: Sends messages to a dedicated Discord thread for organized notifications
-- **🚫 Advanced Duplicate Prevention**: Content-hash based deduplication with persistent storage
+- **🚫 Advanced Duplicate Prevention**: Hybrid hash-based + time-window deduplication system
 - **📱 Rich Formatting**: Beautiful Discord embeds with AWS branding and metadata
 - **🌍 Timezone Support**: Displays timestamps in localized format for better readability
 - **📊 Comprehensive Logging**: Detailed execution logs for monitoring and debugging
 
 ### Smart Filtering & Protection
-- **⏱️ Extended Time-Window Filtering**: Processes items from the last 24 hours to handle RSS feed inconsistencies
 - **🔑 Content Hash Deduplication**: SHA256-based unique identification prevents duplicate messages
-- **🛡️ Spam Protection**: Limits maximum 5 items per execution to prevent channel flooding
+- **🛡️ Safety Time Windows**: First run (24h) and subsequent runs (7-day safety net)
+- **📈 Spam Protection**: Limits maximum 3 items per execution to prevent channel flooding
 - **⚡ Rate Limiting**: 2-second delays between messages to respect Discord API limits
-- **🔍 Content Validation**: Validates timestamps and content integrity before delivery
+- **🔍 Adaptive Filtering**: Different strategies for first run vs. subsequent executions
 
 ### Enterprise-Ready
 - **💾 Persistent Storage**: Uses Git repository to store sent message hashes across workflow runs
 - **🔐 Secure Configuration**: Uses GitHub Secrets for sensitive data management
-- **🚨 Error Handling**: Comprehensive error catching with detailed logging
+- **🚨 Robust Error Handling**: Comprehensive error catching with detailed logging
 - **📈 Scalable Architecture**: Designed for reliable long-term operation
-- **🔧 Easy Maintenance**: Self-documenting code with extensive inline documentation
 - **🧹 Auto-cleanup**: Automatically removes hash records older than 7 days
+- **🔧 Easy Maintenance**: Self-documenting code with extensive inline documentation
 
 ## 📋 Prerequisites
 
@@ -100,13 +100,21 @@ Add these repository secrets:
    - ✅ **Read and write permissions**
    - ✅ **Allow GitHub Actions to create and approve pull requests**
 
-### Step 5: Activation
+### Step 5: Initialize Hash File (Recommended)
+
+To prevent sending old announcements on first run, create an initial hash file:
+
+1. **Create the file**: `sent_messages_hashes.json` in repository root
+2. **Option A - Empty Start**: Use `{}` for empty file (will use 24h time filter on first run)
+3. **Option B - Pre-populated**: Use the complete hash file provided in this repository to mark all current AWS announcements as "already sent"
+
+### Step 6: Activation
 
 1. **Commit and Push** your workflow file to the repository
 2. **Verify Setup**: Go to **Actions** tab and check for the workflow
 3. **Manual Test**: Click **Run workflow** to test the setup
 4. **Monitor Logs**: Check the execution logs for any errors
-5. **Verify Hash File**: After first run, check that `sent_messages_hashes.json` is created
+5. **Verify Hash File**: After first run, confirm that `sent_messages_hashes.json` is created/updated
 
 ## ⚙️ Configuration
 
@@ -126,15 +134,19 @@ schedule:
 Adjust the maximum items per execution:
 
 ```javascript
-const MAX_ITEMS_PER_EXECUTION = 5;  // Default: 5 items
+const MAX_ITEMS_PER_EXECUTION = 3;  // Default: 3 items for safety
 ```
 
-### Time Window Filtering
+### Safety Time Windows
 
-Modify the freshness threshold:
+Modify the safety thresholds:
 
 ```javascript
-const cutoffTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);  // Default: 24 hours
+// First run protection (prevents flooding with old announcements)
+const cutoffTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);  // 24 hours
+
+// Subsequent run safety net (prevents sending very old items if hash system fails)
+const safetyWindow = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);  // 7 days
 ```
 
 ### Hash Cleanup Period
@@ -151,44 +163,56 @@ const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);  // Default: 
 
 ```mermaid
 graph TD
-    A[GitHub Actions Scheduler] -->|Every 30 minutes| B[RSS Parser]
-    B -->|Fetch| C[AWS RSS Feed]
-    C -->|Parse XML| D[Load Hash History]
-    D -->|Git Repository| E[Filter Items]
-    E -->|24-hour window + Hash check| F[Spam Protection]
-    F -->|Max 5 items| G[Discord Formatter]
-    G -->|Rich Embeds| H[Discord Webhook]
-    H -->|Thread Delivery| I[Discord Channel]
-    I --> J[Update Hash Storage]
-    J -->|Git Commit| K[Git Repository]
+    A[GitHub Actions Scheduler] -->|Every 30 minutes| B[Check Hash File]
+    B -->|Load existing hashes| C[RSS Parser]
+    C -->|Fetch| D[AWS RSS Feed]
+    D -->|Parse XML| E{First Run?}
+    E -->|Yes| F[24h Time Filter + Hash Check]
+    E -->|No| G[Hash Check + 7d Safety Filter]
+    F --> H[Apply Spam Protection]
+    G --> H
+    H -->|Max 3 items| I[Discord Formatter]
+    I -->|Rich Embeds| J[Discord Webhook]
+    J -->|Thread Delivery| K[Discord Channel]
+    K --> L[Update Hash Storage]
+    L -->|Git Commit| M[Save to Repository]
+    M --> N[Auto-cleanup Old Hashes]
 ```
 
 ### Execution Flow
 
 1. **Scheduled Trigger**: GitHub Actions initiates execution every 30 minutes
 2. **Hash Loading**: Loads previously sent message hashes from `sent_messages_hashes.json`
-3. **RSS Retrieval**: Fetches the latest AWS announcements from the official feed
-4. **Dual Filtering**: Applies both time-based (24-hour window) and hash-based deduplication
-5. **Content Validation**: Verifies item integrity and applies spam protection
-6. **Message Formatting**: Creates rich Discord embeds with AWS branding
-7. **Thread Delivery**: Sends formatted messages to the designated Discord thread
-8. **Hash Storage**: Records successful deliveries and commits to repository
-9. **Cleanup**: Automatically removes hash records older than 7 days
+3. **First Run Detection**: Determines if this is the first execution (empty hash file)
+4. **RSS Retrieval**: Fetches the latest AWS announcements from the official feed
+5. **Adaptive Filtering**: 
+   - **First Run**: 24-hour time window + hash check (safety against old announcements)
+   - **Subsequent Runs**: Hash check + 7-day safety window (primary deduplication)
+6. **Spam Protection**: Limits to maximum 3 items per execution
+7. **Message Formatting**: Creates rich Discord embeds with AWS branding
+8. **Thread Delivery**: Sends formatted messages to the designated Discord thread
+9. **Hash Storage**: Records successful deliveries and commits back to repository
+10. **Auto-cleanup**: Removes hash records older than 7 days
 
 ### Advanced Duplicate Prevention Strategy
 
-The bot uses a **two-layer deduplication system**:
+The bot uses a **sophisticated multi-layer deduplication system**:
 
-#### Layer 1: Time-based Filtering
-- **Extended Time Window**: Processes items from the last 24 hours (not 3 minutes)
-- **Handles RSS Inconsistencies**: Accounts for stale publication dates in AWS feed
-- **Flexible Coverage**: Ensures no announcements are missed due to timing issues
+#### Layer 1: First Run Protection
+- **Detection**: Empty or missing hash file indicates first run
+- **Strategy**: 24-hour time window to prevent flooding with old announcements
+- **Safety**: Ensures first execution only sends recent AWS updates
 
-#### Layer 2: Content Hash Deduplication
-- **Unique Identification**: Generates SHA256 hash from `title + link + publication date`
-- **Persistent Storage**: Stores sent message hashes in Git repository
-- **Cross-session Memory**: Remembers sent messages between workflow executions
-- **Automatic Cleanup**: Removes old hashes after 7 days to prevent file bloat
+#### Layer 2: Hash-Based Deduplication (Primary)
+- **Method**: SHA256 hash generated from `title + link + publication date`
+- **Storage**: Persistent storage in Git repository (`sent_messages_hashes.json`)
+- **Coverage**: Remembers all sent messages across workflow executions
+- **Efficiency**: O(1) lookup time for duplicate detection
+
+#### Layer 3: Safety Time Window (Backup)
+- **Purpose**: Backup protection against very old items (7+ days)
+- **Trigger**: Activated even in subsequent runs as safety net
+- **Scenario**: Protects against hash file corruption or system failures
 
 #### Hash File Structure
 ```json
@@ -199,36 +223,56 @@ The bot uses a **two-layer deduplication system**:
 }
 ```
 
+**Key**: 16-character SHA256 hash of content  
+**Value**: ISO timestamp when message was successfully sent to Discord
+
 ## 📊 Expected Behavior
 
-### Normal Operation
+### First Run Scenario
 ```
-📅 Typical Day:
-├── 09:00 → 0 items (no new announcements)
-├── 09:30 → 0 items (quiet period) 
-├── 10:00 → 1 item (new EC2 feature) → Hash saved
-├── 10:30 → 0 items (duplicate detected)
-└── 11:00 → 2 items (S3 and Lambda updates) → Hashes updated
+🚀 FIRST RUN DETECTED: Using 24-hour time filter for safety
+⏰ First run cutoff time: 2025-07-26T14:00:00.000Z
+📄 Evaluating: "AWS Transfer Family (yesterday)..."
+   ✨ FIRST RUN QUALIFIED! Age: 12 hours
+📄 Evaluating: "Amazon Connect (3 days ago)..."
+   ⏰ FILTERED OUT: Age: 72 hours (first run protection)
+🎯 Filtering complete: 1-3 new items qualify for Discord delivery
+💾 Saved 3 hash records to storage
+```
+
+### Subsequent Run (Normal Operation)
+```
+🔄 SUBSEQUENT RUN: Using hash + time safety filter
+📚 Loaded 25 hash records from storage
+📄 Evaluating: "AWS Transfer Family..."
+   🚫 DUPLICATE DETECTED: Already sent on 2025-07-27T13:08:58.119Z
+📄 Evaluating: "New AWS Service..."
+   ✨ NEW ITEM QUALIFIED! Age: 2 hours (hash not found)
+📄 Evaluating: "Very Old Announcement (10 days)..."
+   🛡️ SAFETY FILTERED: Age: 10 days (exceeds 7-day safety window)
+🎯 Filtering complete: 1 new items qualify for Discord delivery
 ```
 
 ### High-Activity Periods
 ```
 📈 AWS Conference Days (re:Invent):
-├── Multiple announcements per hour
-├── Spam protection activates (5 item limit)
-├── Excess items logged but not sent
-├── All successful deliveries hashed
-└── Prevents Discord channel flooding
+├── Multiple announcements detected
+├── Hash-based deduplication prevents duplicates
+├── Spam protection limits to 3 items per execution
+├── Remaining items processed in subsequent runs
+├── All successful deliveries tracked in hash file
+└── No Discord channel flooding
 ```
 
 ### Hash File Evolution
 ```
-📈 Hash File Growth:
-├── Day 1: 3 hashes (3 announcements)
+📈 Hash File Growth Over Time:
+├── Day 1: 3 hashes (first announcements)
 ├── Day 2: 7 hashes (4 new announcements)
-├── Day 7: 25 hashes (peak activity)
-├── Day 8: 20 hashes (auto-cleanup removes old entries)
-└── Steady state: ~15-30 hashes typically
+├── Day 7: 25 hashes (active week)
+├── Day 8: 22 hashes (auto-cleanup removes day 1 entries)
+├── Day 14: 20-30 hashes (steady state)
+└── Long-term: ~15-35 hashes typically (rolling 7-day window)
 ```
 
 ## 🐛 Troubleshooting
@@ -238,78 +282,107 @@ The bot uses a **two-layer deduplication system**:
 #### No Messages Received
 **Symptoms**: Workflow runs successfully but no Discord messages appear
 
-**Solutions**:
-1. Verify `DISCORD_WEBHOOK_URL` is correct and active
-2. Check `THREAD_ID` matches your Discord thread
-3. Confirm webhook permissions in Discord
-4. Review GitHub Actions logs for error messages
-5. Check if items are being filtered by time window (24-hour limit)
+**Diagnostic Steps**:
+1. Check workflow logs for `✅ Successfully delivered to Discord` messages
+2. Verify Discord webhook URL is correct and active
+3. Confirm thread ID matches your Discord thread
+4. Review spam protection logs - items might be filtered
 
-#### Duplicate Messages Still Appearing
+**Solutions**:
+1. Test Discord webhook manually using a tool like curl
+2. Regenerate webhook URL if needed
+3. Verify thread permissions and webhook scope
+4. Check if all items are being filtered by hash/time windows
+
+#### Duplicate Messages Appearing
 **Symptoms**: Same announcement appears multiple times despite hash system
 
+**Diagnostic Steps**:
+1. Check if `sent_messages_hashes.json` exists and is being updated
+2. Review "Commit hash file" step logs for git errors
+3. Verify repository write permissions
+4. Look for error messages in hash file operations
+
 **Solutions**:
-1. Check if `sent_messages_hashes.json` file exists in repository
-2. Verify GitHub Actions has write permissions to repository
-3. Review "Commit hash file" step logs for git errors
-4. Ensure no multiple workflow instances are running
-5. Check if hash file is being committed successfully
+1. **Repository Permissions**: Settings → Actions → General → "Read and write permissions"
+2. **Manual Hash File Creation**: Create empty `{}` file if missing
+3. **Branch Protection**: Ensure GitHub Actions can push to main branch
+4. **File Corruption**: Reset hash file if corrupted
 
 #### Hash File Not Created/Updated
-**Symptoms**: `sent_messages_hashes.json` remains empty or unchanged
+**Symptoms**: `sent_messages_hashes.json` remains empty, missing, or unchanged
+
+**Diagnostic Steps**:
+```bash
+# Look for these log patterns:
+💾 Saved X hash records to storage
+📁 Hash file found, checking contents...
+💾 Committing hash file changes...
+✅ Successfully pushed hash file to repository
+```
 
 **Solutions**:
-1. **Check Repository Permissions**: Settings → Actions → General → "Read and write permissions"
-2. **Review Git Step Logs**: Look for push failures or commit errors
-3. **Manual File Creation**: Create empty `{}` file if needed
-4. **Branch Protection**: Ensure GitHub Actions can push to main branch
+1. **Check Git Permissions**: Verify Actions can write to repository
+2. **Review Commit Logs**: Look for git push failures
+3. **Manual Initialization**: Create initial hash file with current announcements
+4. **Debug Mode**: Add additional logging to track file operations
 
 #### Missing Recent Announcements
 **Symptoms**: New AWS announcements don't appear in Discord
 
+**Diagnostic Steps**:
+1. Check if announcements fall within time windows
+2. Review RSS feed accessibility in logs
+3. Verify hash generation and storage processes
+4. Look for spam protection activation
+
 **Solutions**:
-1. Verify AWS RSS feed accessibility
-2. Check if announcements fall within 24-hour window
-3. Review spam protection logs for filtering details
-4. Ensure Discord webhook is not rate-limited
+1. Adjust safety time windows if too restrictive
+2. Verify AWS RSS feed URL accessibility
+3. Check Discord API rate limiting
+4. Review spam protection thresholds
 
 ### Debug Mode
 
-Enable verbose logging by adding debug statements:
+Enable enhanced logging by modifying the script:
 
 ```javascript
 // Add after hash loading
-console.log('🔍 Debug: Loaded hashes:', Object.keys(sentHashes));
-console.log('🔍 Debug: Time filtering details:', { now, cutoffTime });
+console.log('🔍 Debug: Loaded hashes count:', Object.keys(sentHashes).length);
+console.log('🔍 Debug: First run detection:', isFirstRun);
 
-// Add after filtering
-console.log('🔍 Debug: Items after filtering:', newItems.length);
+// Add after each item evaluation
+console.log('🔍 Debug: Item evaluation details:', {
+  title: item.title.substring(0, 30),
+  hash: contentHash,
+  published: item.pubDate,
+  age: ageCalculation
+});
+
+// Add before Discord delivery
+console.log('🔍 Debug: Final items to process:', newItems.map(i => i.contentHash));
 ```
 
 ### Log Analysis
 
-Monitor these key log messages:
+Monitor these key log patterns:
 
-- `📚 Loaded X hash records from storage`: Hash file loading status
-- `🚫 DUPLICATE DETECTED`: Successful duplicate prevention
-- `✅ Successfully delivered to Discord`: Successful message delivery
-- `💾 Saved X hash records to storage`: Hash file update
-- `⚠️ SPAM PROTECTION ACTIVATED`: Too many items filtered to 5
-- `📭 No new items found`: No new content in time window
+**Successful Operation**:
+- `📚 Loaded X hash records from storage`
+- `🔄 SUBSEQUENT RUN: Using hash + time safety filter`
+- `✨ NEW ITEM QUALIFIED! Age: X hours (hash not found)`
+- `✅ Successfully delivered to Discord`
+- `💾 Saved X hash records to storage`
+
+**Duplicate Prevention Working**:
+- `🚫 DUPLICATE DETECTED: Already sent on [timestamp]`
+- `🛡️ SAFETY FILTERED: Age: X days (exceeds 7-day safety window)`
+
+**Potential Issues**:
 - `❌ CRITICAL ERROR`: System-level failures requiring attention
-
-### Git Integration Debugging
-
-Check these specific logs in "Commit hash file" step:
-
-```bash
-📁 Hash file found, checking contents...
-📄 File contents: {"hash": "timestamp"}
-📊 Git status before adding file: 
-💾 File has changes, committing...
-🚀 Attempting to push to repository...
-✅ Successfully pushed hash file to repository
-```
+- `Failed to push to repository`: Git permission issues
+- `No changes to commit`: Hash file not being updated
+- `ReferenceError`: Code errors in script execution
 
 ## 🔒 Security Considerations
 
@@ -319,15 +392,16 @@ Check these specific logs in "Commit hash file" step:
 - **Regularly rotate** Discord webhook URLs if compromised
 - **Review access permissions** periodically
 
-### Webhook Security
-- **Limit webhook scope** to specific channels only
-- **Monitor webhook usage** through Discord audit logs
-- **Revoke unused webhooks** to reduce attack surface
-
 ### Repository Security
 - **Monitor hash file commits** for unusual activity
 - **Review workflow permissions** regularly
 - **Use branch protection** if needed (with Actions bypass)
+- **Audit repository access** periodically
+
+### Webhook Security
+- **Limit webhook scope** to specific channels only
+- **Monitor webhook usage** through Discord audit logs
+- **Revoke unused webhooks** to reduce attack surface
 
 ## 📈 Performance & Limits
 
@@ -342,12 +416,33 @@ Check these specific logs in "Commit hash file" step:
 - **Message Size Limit**: 2000 characters (our embeds: ~800 characters)
 
 ### Storage Efficiency
-- **Hash File Size**: Typically 1-5KB (very lightweight)
-- **Git History**: Minimal impact (~1KB per commit)
+- **Hash File Size**: Typically 1-8KB (very lightweight)
+- **Git History Impact**: ~1KB per commit (minimal)
 - **Auto-cleanup**: Prevents unbounded growth
+- **Long-term Stability**: File size remains constant after initial period
+
+## 🔄 Maintenance
+
+### Regular Tasks
+- **Monitor workflow runs** for consistent execution
+- **Review Discord channel** for message delivery
+- **Check repository commits** for hash file updates
+- **Verify webhook functionality** periodically
+
+### Updating the Bot
+1. **Backup current hash file** before major updates
+2. **Test changes** with manual workflow runs
+3. **Monitor logs** after updates for new issues
+4. **Update documentation** for any configuration changes
+
+### Hash File Management
+- **Normal Operation**: No manual intervention required
+- **Reset System**: Delete hash file to restart (will use 24h filter)
+- **Bulk Initialize**: Use provided complete hash file to mark all current announcements
+- **Troubleshooting**: Check git history for hash file evolution
 
 ## 📝 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-*Stay updated with the latest AWS announcements effortlessly!*
+*Stay updated with the latest AWS announcements effortlessly - no duplicates, no spam, just the news you need!*
